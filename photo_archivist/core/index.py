@@ -1,6 +1,7 @@
-"""Step 9: Index — SQLite schema matching S7 + FTS5."""
+"""Step 9: Index — SQLite schema matching S7 + FTS5 (+ folder profiles)."""
 from __future__ import annotations
 import json
+import os
 import sqlite3
 
 SCHEMA = """
@@ -92,3 +93,67 @@ def upsert_file(c: sqlite3.Connection, rec: dict) -> None:
          (rec.get("place") or {}).get("value") or "", (rec.get("event") or {}).get("value") or ""),
     )
     c.commit()
+
+
+# --- folder profiles: the learning loop behind thresholds.promote ----------
+
+def _vec_from_blob(b: bytes | None) -> list | None:
+    if not b:
+        return None
+    import struct
+    try:
+        return list(struct.unpack(f"{len(b) // 4}f", b))
+    except Exception:
+        return None
+
+
+def profile_from_records(name: str, recs: list[dict]) -> dict:
+    """Fold the records filed into one folder into a decide()-ready profile."""
+    vecs = [r["vectors"]["text"] for r in recs
+            if (r.get("vectors") or {}).get("text")]
+    centroid: list | None = None
+    if vecs:
+        d = len(vecs[0])
+        centroid = [sum(v[i] for v in vecs) / len(vecs) for i in range(d)]
+    tags = sorted({t for r in recs for t in (r.get("tags") or [])})
+    people = sorted({p["name"] for r in recs for p in (r.get("people") or [])})
+    dates = sorted(r["taken_at"] for r in recs if r.get("taken_at"))
+    places = [ (r.get("place") or {}).get("value") for r in recs
+               if (r.get("place") or {}).get("value") ]
+    return {"name": name, "centroid": centroid, "tags": tags, "people": people,
+            "place": places[0] if places else None,
+            "date_from": dates[0] if dates else None,
+            "date_to": dates[-1] if dates else None, "pattern": None}
+
+
+def upsert_folder(c: sqlite3.Connection, prof: dict) -> None:
+    c.execute(
+        """INSERT OR REPLACE INTO folders
+           (name, centroid, tags, people, place, date_from, date_to, pattern)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (prof.get("name"), _vec_blob(prof.get("centroid")),
+         json.dumps(prof.get("tags") or []), json.dumps(prof.get("people") or []),
+         prof.get("place"), prof.get("date_from"), prof.get("date_to"),
+         prof.get("pattern")))
+    c.commit()
+
+
+def load_folders(db_path: str) -> list[dict]:
+    """All persisted folder profiles (empty list when the index doesn't exist)."""
+    if not db_path or not os.path.exists(db_path):
+        return []
+    c = connect(db_path)
+    out: list[dict] = []
+    for r in c.execute(
+            "SELECT name, centroid, tags, people, place, date_from, date_to,"
+            " pattern FROM folders"):
+        try:
+            out.append({"name": r[0], "centroid": _vec_from_blob(r[1]),
+                        "tags": json.loads(r[2] or "[]"),
+                        "people": json.loads(r[3] or "[]"),
+                        "place": r[4], "date_from": r[5], "date_to": r[6],
+                        "pattern": r[7]})
+        except Exception:
+            continue
+    c.close()
+    return out

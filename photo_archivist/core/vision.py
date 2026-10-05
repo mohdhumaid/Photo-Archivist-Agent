@@ -11,6 +11,8 @@ class VisionResult:
     objects: list = field(default_factory=list)
     visible_text: str = ""
     face_boxes: list = field(default_factory=list)
+    face_embeddings: list = field(default_factory=list)  # one 512-d vector per face
+    image_vec: list | None = None                        # CLIP embedding, when available
     tags: list = field(default_factory=list)
     confidences: dict = field(default_factory=dict)
     backend: str = "mock"

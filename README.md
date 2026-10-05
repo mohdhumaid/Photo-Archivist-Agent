@@ -34,11 +34,12 @@ following the `VisionBackend` interface. Faces never leave the machine.
 ```
 config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, models)
 people_library.yaml     # confirmed names + org role map (MD -> Anita Rao ...)
-photo_archivist/cli.py  # scan / search / undo
+faces_library.json      # enrolled face embeddings (LOCAL ONLY, git-ignored)
+photo_archivist/cli.py  # scan / search / undo / enroll
 photo_archivist/core/
   detect.py fingerprint.py pipeline.py
   metadata/{exif,docs,video,fs,reconcile,place}.py
-  text.py vision.py people.py place.py embed.py
+  text.py vision.py vision_local.py people.py place.py embed.py
   index.py decide.py organise.py search.py report.py pii.py
 tests/  sample_data/  data/
 ```
@@ -93,16 +94,16 @@ filled from sources that exist:
 
 To enable real facial detection:
 
-| What to edit | Where |
+| What to do | Where / how |
 |---|---|
 | Install local-AI deps | `pip install -e .[ai-local]` → insightface, onnxruntime (see `pyproject.toml` `[project.optional-dependencies] ai-local`) |
-| Switch the backend | `config.yaml` → `vision.backend: local` (currently `mock`) |
-| Face match strictness | `config.yaml` → `faces.match_threshold: 0.60`, `faces.local_only: true` |
-| The model code itself | create `photo_archivist/core/vision_local.py` with `class LocalVision(VisionBackend)` — `vision.py::get_backend()` already imports it automatically and falls back to `mock` if the file is missing |
-| Confirmed names to match against | `people_library.yaml` / `config.yaml` → `people:` (name → role) |
-| Wiring into the pipeline | `photo_archivist/core/pipeline.py` (`# --- people ---` step) — call `match_local(face_embedding, library)` there once your backend emits face embeddings |
+| Switch the backend | `config.yaml` → `vision.backend: local` (currently `mock`) — `vision_local.py` is already implemented and auto-loads |
+| Enroll confirmed people | `python -m photo_archivist.cli enroll "Anita Rao" portrait.jpg` → writes `faces_library.json` (git-ignored, local only) |
+| Face match strictness | `config.yaml` → `faces.match_threshold: 0.60`, `faces.local_only: true`, `faces.library: faces_library.json` |
+| Pipeline wiring | ✅ Done — `pipeline.py` runs `match_local()` for every detected face against the library and records hits in `people` (source `face_match_local`) |
 
-Faces are **local-only** (`faces.local_only: true`): embeddings never leave the machine.
+Faces are **local-only** (`faces.local_only: true`): embeddings never leave the machine and
+`faces_library.json` is excluded from git.
 
 ## Reading the `search` output
 
@@ -122,27 +123,47 @@ Organised/Inbox/AkhilVerma.jpeg :: Cline / Images (from path) · 2026-10-05T22:3
 
 
 
-## Dummy vs live — what is simulated and how to go fully real
+## Dummy vs live — what changed in code to go real
 
-Several components intentionally ship as **stubs** so the pipeline runs with zero AI
-dependencies. Each is safe (it never fabricates confident claims) and has a defined upgrade path:
+Most stubs now have **real implementations with graceful fallbacks**: the pipeline always runs,
+and each component upgrades itself automatically when its dependency is installed.
 
-| # | Component | What runs today (dummy) | How to make it LIVE |
+| # | Component | Status now | Code changes made |
 |---|---|---|---|
-| 1 | **Vision / captions** | `config.yaml → vision.backend: mock` → `MockVision` echoes the path hint and appends `(mock vision — no claim)` to every caption. No objects, scenes, or faces detected. | ① `pip install -e .[ai-local]` ② create `photo_archivist/core/vision_local.py` with `class LocalVision(VisionBackend)` (Moondream/LLaVA/CLIP plug in here; `vision.py` auto-imports it and falls back to mock if missing) ③ set `vision.backend: local` ④ `undo` + re-scan so sidecars regenerate. |
-| 2 | **Text embeddings** | `embed.py::text_vector` = SHA-256 bag-of-words hashed into 128 dims. Deterministic but **semantic-poor** (synonyms don't match). Stored in `index.db → txt_vec`. | `pip install sentence-transformers` (in the `ai-local` extra); replace the body of `text_vector()` with `SentenceTransformer("all-MiniLM-L6-v2").encode(text)` (dim 384). Then rebuild the index — stored vectors must all be recomputed. |
-| 3 | **Image embeddings** | Always `null` — `pipeline.py` hardcodes `"image": None`, so visual similarity is inert (the `img_vec` column already exists, unused). | `pip install open-clip-torch` (in `ai-local`); compute a CLIP `ViT-B-32` embedding in `pipeline.py` beside `txt_vec` and pass it through `idx.upsert_file`. |
-| 4 | **Reverse geocoding** | `place.py::reverse_geocode` is an explicit **offline stub**: returns `lat,lon` with `source: gps_reverse_geocode_offline_stub`, confidence 0.5. `data/` is empty — no gazetteer. | Download a GeoNames dump (e.g. `cities15000` + `alternateNamesV2`) and load it into SQLite at `config.yaml → geocode.offline_db` (`data/gazetteer.db`); `reverse_geocode(lat, lon, db_path)` already accepts the path. Online APIs are intentionally unsupported — GPS must not leave the machine. |
-| 5 | **Face recognition / people** | Only embedded XMP `PersonInImage` tags are read. `faces:` config and `people.py::match_local()` exist but are never invoked → `people: []` for normal photos. | See *Facial detection / people model* above: install `ai-local`, write `vision_local.py` emitting face boxes + embeddings, wire `match_local()` into `pipeline.py`, fill `people:` names. |
-| 6 | **Folder profiles / learning** | `scan` always starts with an empty profile list → every file is `new_folder` (lands in `Organised/Inbox/`). The `folders` table (centroids/tags/people per folder) is never written, so `thresholds.promote: 0.80` never fires. | After each apply, upsert each destination folder's centroid/tags/people into the `folders` table (schema already in `index.py`) and pass those profiles into `decmod.decide()` on the next scan. |
-| 7 | **Role placeholders** | `config.yaml → roles: MD: "", CFO: ""` — empty strings mean role keywords (`"MD letter"`) resolve to no person filter. | Fill in real names (`MD: "Anita Rao"`), or maintain them in `people_library.yaml`, which overrides `config.yaml`. |
-| 8 | **OCR** | ✅ **Live** on your machine (`/opt/homebrew/bin/tesseract`) — e.g. *"welcome mr. amol padhye"* is extracted from images and searchable. | Nothing to do. If missing: `brew install tesseract` / `apt install tesseract-ocr`. |
-| 9 | **Metadata extraction** | ✅ **Live** (`exiftool` 13.55): EXIF, sizes, dates, permissions are all read for real. | Nothing to do. |
+| 1 | **Vision / captions** | ⚙️ **Ready** — real backend implemented, activates when AI extras are installed | **New file** `photo_archivist/core/vision_local.py`: `LocalVision` does insightface face detection (+ optional CLIP image vectors). `vision.py::get_backend("local")` auto-imports it and falls back to `mock` if insightface is missing. Captions stay empty on purpose (no VLM → no fabricated claims). Activate: `pip install -e .[ai-local]`, `vision.backend: local`. |
+| 2 | **Text embeddings** | ✅ **Live when installed** — auto-detects sentence-transformers | **`embed.py` rewritten**: `text_vector(backend=...)` with `auto` (sbert if importable, else hash), `sbert` (strict), `hash` (old behaviour). `pipeline.py` passes `cfg.embeddings.backend` (default `auto` in `config.yaml`). First run downloads `all-MiniLM-L6-v2` (~90 MB, cached). |
+| 3 | **Image embeddings** | ⚙️ **Ready** — computed whenever open-clip is installed | `VisionResult.image_vec` added; `vision_local.py` encodes CLIP `ViT-B-32` per image; `pipeline.py` stores it into the existing `img_vec` column (previously hardcoded `None`). |
+| 4 | **Reverse geocoding** | ✅ **Live** — real SQLite gazetteer lookup | **`place.py` rewritten**: `reverse_geocode()` queries `geonames(lat,lon)` within ±0.5° (confidence 0.9) when the DB exists, else the old stub. **New** `load_gazetteer(tsv, db)` builds the DB from a GeoNames dump. `pipeline.py` now passes `cfg.geocode.offline_db`. |
+| 5 | **Face recognition** | ⚙️ **Ready** — full path implemented, needs `ai-local` + enrollment | `pipeline.py` now calls `match_local()` for every face embedding against `faces_library.json`; **new** `people.py::load_face_library()`; **new CLI** `enroll NAME PHOTO` registers a confirmed face; `faces.library` key in `config.yaml`; `faces_library.json` is **git-ignored** (biometrics never leave your machine, never committed). |
+| 6 | **Folder learning** | ✅ **Live** — pure code, fully active today | **`index.py`**: `profile_from_records()`, `upsert_folder()`, `load_folders()` (uses the existing `folders` table). **`cli.py scan`**: loads learned profiles before `decide()`, files promoted files into the learned folder (not always `Inbox`), then persists updated profiles after apply — so `thresholds.promote: 0.80` now actually fires on re-scans. |
+| 7 | **Role placeholders** | 📝 **User data** | Not code — put real names in `config.yaml → roles` or `people_library.yaml` (see *People library* above). |
+| 8 | **OCR** | ✅ Already live (`tesseract`) | Nothing to change. |
+| 9 | **Metadata extraction** | ✅ Already live (`exiftool`) | Nothing to change. |
 
-**Rule of thumb:** anything ending in `mock`, `stub`, `hash`, or `no claim` in the output is a
-dummy. After changing any of the above, run `undo` (or delete `index.db` + `Organised/`) and
-re-run `scan --no-dry-run --yes` — already-written sidecars and vectors are **not**
-retroactively upgraded.
+### Going live — commands
+
+```bash
+# 1-3, 5: install local AI extras (insightface, sentence-transformers, CLIP, torch)
+pip install -e .[ai-local]
+# then in config.yaml:  vision.backend: local
+# (embeddings.backend: auto picks up sentence-transformers by itself)
+
+# 5: enroll a confirmed face (writes faces_library.json — git-ignored, local only)
+python -m photo_archivist.cli enroll "Anita Rao" /path/to/clear-portrait.jpg
+
+# 4: build the offline gazetteer (GeoNames dump; no online calls ever)
+curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
+python -c "from photo_archivist.core.place import load_gazetteer; print(load_gazetteer('cities500.txt', 'data/gazetteer.db'))"
+
+# 6: already live — nothing to install. Just re-scan: scan loads learned folder
+#    profiles and promotes matching files instead of dumping them in Inbox/.
+```
+
+**Rule of thumb:** anything ending in `mock`, `stub`, or `no claim` in the output is a
+fallback. After changing any component, run `undo` (or delete `index.db` + `Organised/`) and
+re-scan — already-written sidecars and vectors are **not** retroactively upgraded. Switching
+`embeddings.backend` between `hash` (128-d) and `sbert` (384-d) also requires a rebuild so all
+stored vectors share one dimension.
 
 ## What This Project Does
 

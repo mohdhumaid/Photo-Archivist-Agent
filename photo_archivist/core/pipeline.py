@@ -46,9 +46,11 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
                               tz_default=cfg.get("timezone_default", "Asia/Kolkata"))
     pl = placemod.reconcile_place(raw, segs, takeout)
     if pl.get("needs_geocode") and pl.get("gps"):
-        g = placelib.reverse_geocode(pl["gps"][0], pl["gps"][1])
+        g = placelib.reverse_geocode(
+            pl["gps"][0], pl["gps"][1],
+            db_path=(cfg.get("geocode") or {}).get("offline_db"))
         pl["value"] = g["value"]
-        pl["source"] = "gps_reverse_geocode"
+        pl["source"] = g["source"]
     flags = placemod.sanity_flags(raw, date)
     # --- text ---
     ocr_text, caption_extra = "", ""
@@ -69,8 +71,17 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
     vb = vision_backend or visionmod.get_backend((cfg.get("vision") or {}).get("backend", "mock"))
     prime = {"place": pl.get("value"), "event_hint": " / ".join(segs[-2:]) if segs else ""}
     vr = vb.describe(path, prime)
-    # --- people ---
+    # --- people: XMP region names + local face matches (when enabled) ---
     persons = peoplemod.region_names(raw)
+    faces_cfg = cfg.get("faces") or {}
+    if vr.face_embeddings:
+        face_lib = peoplemod.load_face_library(faces_cfg.get("library", "faces_library.json"))
+        if face_lib:
+            thr = float(faces_cfg.get("match_threshold", 0.60))
+            for emb in vr.face_embeddings:
+                m = peoplemod.match_local(emb, face_lib, thr)
+                if m and all(m["name"] != p["name"] for p in persons):
+                    persons.append(m)
     # --- event/tags from keywords + path ---
     tags: list[str] = []
     for k, v in raw.items():
@@ -82,9 +93,11 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
                 tags.append(str(v))
     tags.extend(segs[-3:])
     event_val = tags[0] if tags else None
-    # --- embed ---
+    # --- embed (sbert when installed, hash fallback — see embed.py) ---
+    emb_backend = (cfg.get("embeddings") or {}).get("backend", "auto")
     txt_vec = embedmod.text_vector(
-        " ".join([vr.caption, " ".join(tags), ocr_text, " ".join(segs)]))
+        " ".join([vr.caption, " ".join(tags), ocr_text, " ".join(segs)]),
+        backend=emb_backend)
     # --- record (S7) ---
     pii_flags = piimod.scan_text(ocr_text, vr.caption, vr.visible_text)
     if not raw:
@@ -117,7 +130,7 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
         "raw_metadata": {"exif": raw, "fs": fstat, "xattr": bool(xa),
                          "takeout": bool(takeout), "xmp_sidecar": bool(xmp),
                          "filename": fname, "probe": bool(probe)},
-        "vectors": {"image": None, "text": txt_vec},
+        "vectors": {"image": vr.image_vec, "text": txt_vec},
         "_segs": segs,
     }
     return rec_out

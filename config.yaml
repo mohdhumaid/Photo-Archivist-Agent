@@ -22,7 +22,9 @@ geocode:
 faces:
   local_only: true
   match_threshold: 0.60
+  library: faces_library.json   # local-only biometrics (git-ignored)
 embeddings:
+  backend: auto      # auto = sentence-transformers when installed, else hash
   text_model: all-MiniLM-L6-v2
   image_model: ViT-B-32
 vision:

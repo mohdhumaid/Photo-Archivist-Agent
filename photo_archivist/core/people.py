@@ -47,3 +47,20 @@ def match_local(embedding: list | None, library: dict, threshold: float = 0.60) 
     if best and best_s >= threshold:
         return {"name": best, "source": "face_match_local", "confidence": round(float(best_s), 3)}
     return None
+
+
+def load_face_library(path: str | None) -> dict:
+    """Face embeddings library {name: [512 floats]} from a local JSON file.
+
+    Missing/invalid file -> empty dict (face matching simply stays off).
+    """
+    import json
+    import os
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            lib = json.load(f) or {}
+        return {k: v for k, v in lib.items() if isinstance(v, list) and v}
+    except Exception:
+        return {}

@@ -85,9 +85,6 @@ def get_backend(name: str, cfg: dict | None = None) -> VisionBackend:
         if llmmod.enabled(cfg):
             return LLMVision(cfg)
         return MockVision()   # not configured -> mock, never a crash
-    # local backends (insightface/CLIP) plug in here; default to mock when unavailable
-    try:
-        from .vision_local import LocalVision  # type: ignore
-        return LocalVision()
-    except Exception:
-        return MockVision()
+    # "local" backends are unavailable under org policy (no model downloads);
+    # route to mock so a stale config never crashes a scan.
+    return MockVision()

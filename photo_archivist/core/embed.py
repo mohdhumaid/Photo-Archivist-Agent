@@ -1,33 +1,14 @@
-"""Step 8: Embeddings — LIVE sentence-transformers when installed, hash fallback.
+"""Step 8: Embeddings — local deterministic hash ONLY.
 
-backend: "auto"  -> sentence-transformers if importable, else hash (default)
-         "sbert" -> require sentence-transformers (raises when missing)
-         "hash"  -> force deterministic bag-of-words hash (128-dim)
-Switching backends changes vector dimensions (384 vs 128) — rebuild the index
-(delete index.db + re-scan) so all stored vectors share one dimension.
+Org policy: models may come ONLY from Purple Fabric. No sentence-transformers /
+Hugging Face downloads, so vectors stay bag-of-words hashes (128-dim, hash-based
+similarity only). Semantic understanding lives in the PF agent output, not here.
 """
 from __future__ import annotations
 import hashlib
 import math
 
 HASH_DIM = 128
-ST_DIM = 384
-_st_model = None
-_st_failed = False
-
-
-def _sbert_model():
-    """Lazily load all-MiniLM-L6-v2 (~90 MB first download, cached afterwards)."""
-    global _st_model, _st_failed
-    if _st_failed:
-        return None
-    if _st_model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            _st_model = SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception:
-            _st_failed = True
-    return _st_model
 
 
 def hash_vector(text: str, dim: int = HASH_DIM) -> list[float]:
@@ -40,15 +21,8 @@ def hash_vector(text: str, dim: int = HASH_DIM) -> list[float]:
     return [v / n for v in vec]
 
 
-def text_vector(text: str, dim: int = HASH_DIM, backend: str = "auto") -> list[float]:
-    if backend in ("auto", "sbert"):
-        m = _sbert_model()
-        if m is not None:
-            return [float(x) for x in m.encode(text or "", normalize_embeddings=True)]
-        if backend == "sbert":
-            raise RuntimeError(
-                "sentence-transformers unavailable — run `pip install -e .[ai-local]` "
-                "or set embeddings.backend: auto")
+def text_vector(text: str, dim: int = HASH_DIM, backend: str = "hash") -> list[float]:
+    """Local hash vectors only — backend argument kept for config compatibility."""
     return hash_vector(text, dim)
 
 

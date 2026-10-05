@@ -113,8 +113,8 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
                 m = peoplemod.match_local(emb, face_lib, thr)
                 if m and all(m["name"] != p["name"] for p in persons):
                     persons.append(m)
-    # --- embed (sbert when installed, hash fallback — see embed.py) ---
-    emb_backend = (cfg.get("embeddings") or {}).get("backend", "auto")
+    # --- embed (local hash only — org policy forbids model downloads) ---
+    emb_backend = (cfg.get("embeddings") or {}).get("backend", "hash")
     txt_vec = embedmod.text_vector(
         " ".join([vr.caption, " ".join(tags), ocr_text, " ".join(segs)]),
         backend=emb_backend)

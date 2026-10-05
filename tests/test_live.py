@@ -91,12 +91,11 @@ def test_match_local_below_threshold():
 
 # --- vision fallback ---------------------------------------------------------
 
-def test_local_backend_falls_back_without_insightface():
-    try:
-        import insightface  # noqa: F401
-    except ImportError:
-        from photo_archivist.core import vision as v
-        assert isinstance(v.get_backend("local"), v.MockVision)
+def test_local_backend_always_resolves_to_mock():
+    from photo_archivist.core import vision as v
+    # org policy: no vision_local module ships, so "local" can never load a model
+    assert isinstance(v.get_backend("local"), v.MockVision)
+    assert isinstance(v.get_backend("local", {}), v.MockVision)
 
 
 # --- e2e: scan learns folders, second scan promotes --------------------------

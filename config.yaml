@@ -24,22 +24,27 @@ faces:
   match_threshold: 0.60
   library: faces_library.json   # local-only biometrics (git-ignored)
 embeddings:
-  backend: auto      # auto = sentence-transformers when installed, else hash
-  text_model: all-MiniLM-L6-v2
-  image_model: ViT-B-32
+  backend: hash    # local hash ONLY — org policy forbids model downloads
 vision:
-  backend: mock   # mock | local | llm
+  backend: mock   # mock | llm  ("local" needs model downloads: blocked by org policy)
 
-# Purple Fabric LLM (optional) — Automation Digital Expert, created in Agent
-# Designer with the Perspective (system prompt) documented in README.md.
+# Purple Fabric Magic Platform — the ONLY AI backend (org policy: no model
+# downloads from Hugging Face or any other site; this repo has no local AI).
+# Flow mirrors the platform sample: GET accesstoken -> POST invokeasset/genai
+# (Input_Text) -> poll invokeasset/<trace_id> until COMPLETED.
 llm:
-  enabled: false            # true -> vision step calls the Purple Fabric agent
-  invoke_url: ""            # POST endpoint of the automation agent (from PF)
-  agent_id: photo-archivist-expert
-  model: claude-sonnet-4-5  # or gpt-5.2 — selected on the agent in PF Agent Designer
-  api_key_env: PURPLE_FABRIC_API_KEY  # key read from this env var, never stored here
-  timeout: 60
-  send_images: false        # false = text-first (privacy); true attaches image bytes
+  enabled: false            # true -> vision step calls the Purple Fabric asset
+  base_url: ""              # e.g. https://dev-api.auuat.bank.in
+  asset_id: ""              # PF agent asset id (ASSET_ID in the sample script)
+  api_key_env: PF_API_KEY   # export PF_API_KEY='...' — never store secrets here
+  username_env: PF_USERNAME
+  password_env: PF_PASSWORD
+  api_key: ""               # fallback if env vars are unset — do NOT commit real values
+  username: ""
+  password: ""
+  poll_interval: 5          # seconds between result polls
+  poll_timeout: 300         # give up polling after this many seconds
+  send_images: false        # true = embed image bytes inside Input_Text (10 MB cap)
 
 # People library: confirmed names + org role map (local only; never uploaded)
 people: {}

@@ -122,31 +122,6 @@ def undo(config: str = "config.yaml"):
     typer.echo(f"Removed {len(removed)} files")
 
 
-@app.command()
-def enroll(name: str, photo: str, config: str = "config.yaml"):
-    """Register a confirmed face from a photo into faces_library.json (local only)."""
-    import json
-    cfg = load_cfg(config)
-    faces_cfg = cfg.get("faces") or {}
-    lib_path = faces_cfg.get("library", "faces_library.json")
-    try:
-        from .core.vision_local import LocalVision
-        vb = LocalVision()
-    except Exception as e:
-        typer.echo(f"Face detection unavailable: {e}")
-        typer.echo("Install local AI first: pip install -e .[ai-local]")
-        raise typer.Exit(1)
-    vr = vb.describe(photo, {})
-    if not vr.face_embeddings:
-        typer.echo(f"No face found in {photo}")
-        raise typer.Exit(1)
-    lib = json.loads(open(lib_path).read()) if os.path.exists(lib_path) else {}
-    lib[name] = vr.face_embeddings[0]   # primary (first detected) face
-    with open(lib_path, "w") as f:
-        json.dump(lib, f)
-    typer.echo(f"Enrolled {name} -> {lib_path} "
-               f"({len(lib)} face(s) in library, never uploaded)")
-
 
 if __name__ == "__main__":
     app()

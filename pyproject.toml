@@ -21,13 +21,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ai-local = [
-  "insightface>=0.7",
-  "onnxruntime>=1.17",
-  "sentence-transformers>=2.6",
-  "open-clip-torch>=2.24",
-  "torch>=2.2",
-]
 ocr = ["pytesseract>=0.3"]
 test = ["pytest>=8"]
 

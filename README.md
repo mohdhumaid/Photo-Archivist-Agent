@@ -44,3 +44,4 @@ tests/  sample_data/  data/
 ```
 
 Writes go to `Organised/` + `index.db` + sidecar `.tags.json` + `undo.log` only.
+# Photo-Archivist-Agent

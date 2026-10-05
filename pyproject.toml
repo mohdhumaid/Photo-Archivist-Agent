@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-archivist"
+version = "0.1.0"
+description = "Photo Archivist Agent — bank-grade photo/document organiser (read-only source, copies only)"
+requires-python = ">=3.10"
+dependencies = [
+  "typer>=0.9",
+  "pyyaml>=6",
+  "Pillow>=10",
+  "ImageHash>=4.3",
+  "numpy>=1.26",
+  "pikepdf>=8",
+  "pypdf>=4",
+  "python-docx>=1.1",
+  "openpyxl>=3.1",
+  "olefile>=0.47",
+]
+
+[project.optional-dependencies]
+ai-local = [
+  "insightface>=0.7",
+  "onnxruntime>=1.17",
+  "sentence-transformers>=2.6",
+  "open-clip-torch>=2.24",
+  "torch>=2.2",
+]
+ocr = ["pytesseract>=0.3"]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

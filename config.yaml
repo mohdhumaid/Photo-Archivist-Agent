@@ -1,0 +1,29 @@
+# Photo Archivist Agent — tunable defaults (RULEs live in OPERATING_CONTEXT.md)
+timezone_default: Asia/Kolkata
+thresholds:
+  promote: 0.80      # score >= this -> file into existing folder
+  review_low: 0.60   # 0.60-0.79 -> _Review/, <0.60 -> new folder
+unnamed_face_ask_N: 3
+exclude:
+  - ".DS_Store"
+  - "Thumbs.db"
+  - "*.THM"
+  - "*.AAE"
+  - ".git/*"
+hardlink: false        # true only allows hardlink on same volume, else full copy
+organised_dir: Organised
+index_db: index.db
+undo_log: undo.log
+ocr:
+  backend: tesseract
+  only_if_no_text_layer: true
+geocode:
+  offline_db: data/gazetteer.db
+faces:
+  local_only: true
+  match_threshold: 0.60
+embeddings:
+  text_model: all-MiniLM-L6-v2
+  image_model: ViT-B-32
+vision:
+  backend: mock   # mock | local

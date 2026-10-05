@@ -1,0 +1,5 @@
+# People library: confirmed names + org role map (local only, never uploaded)
+people: {}
+roles:
+  MD: ""
+  CFO: ""

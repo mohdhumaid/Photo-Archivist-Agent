@@ -1,0 +1,105 @@
+"""CLI: scan --dry-run | scan --apply --yes | search | undo | review."""
+from __future__ import annotations
+import json
+import os
+import yaml
+import typer
+from .core import pipeline as pipe
+from .core import index as idx
+from .core import decide as decmod
+from .core import organise as orgmod
+from .core import report as reportmod
+from .core import search as searchmod
+from .core.metadata import fs as fsmod
+
+app = typer.Typer(add_completion=False)
+
+
+def load_cfg(path: str = "config.yaml") -> dict:
+    if os.path.exists(path):
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def iter_source(src: str, exclude: list) -> list[str]:
+    out: list[str] = []
+    for root, _dirs, files in os.walk(src):
+        for fn in files:
+            p = os.path.join(root, fn)
+            if fsmod.is_excluded(p, exclude):
+                continue
+            out.append(p)
+    return sorted(out)
+
+
+@app.command()
+def scan(source: str, dry_run: bool = True, yes: bool = False,
+         config: str = "config.yaml"):
+    cfg = load_cfg(config)
+    files = iter_source(source, cfg.get("exclude", []))
+    typer.echo(f"Found {len(files)} files under {source}")
+    records = [pipe.process_file(p, cfg) for p in files]
+    # duplicate link via sha
+    seen: dict = {}
+    for r in records:
+        if r["sha256"] in seen:
+            seen[r["sha256"]]["duplicates"].append(r["file_id"])
+            r["duplicates"].append(seen[r["sha256"]]["file_id"])
+        else:
+            seen[r["sha256"]] = r
+    # folder profiles: start empty -> all new_folder on dry run unless configured
+    profiles: list = []
+    th = cfg.get("thresholds", {}) or {}
+    decisions = [decmod.decide(r["vectors"]["text"], set(r["tags"] or []),
+                               set(p["name"] for p in r["people"] or []),
+                               profiles, th.get("promote", 0.80),
+                               th.get("review_low", 0.60)) for r in records]
+    rep = reportmod.build_report(records, decisions)
+    typer.echo(json.dumps(rep, indent=2, default=str))
+    if dry_run:
+        typer.echo("DRY RUN — nothing written. Re-run with --no-dry-run --yes to apply.")
+        return
+    if not yes:
+        typer.echo("Refusing to write without --yes (dry run first rule).")
+        raise typer.Exit(1)
+    # apply: write index + copies + sidecars + undo.log
+    db = cfg.get("index_db", "index.db")
+    organised = cfg.get("organised_dir", "Organised")
+    ulog = cfg.get("undo_log", "undo.log")
+    c = idx.connect(db)
+    copies: list[str] = []
+    for r, d in zip(records, decisions):
+        folder = "_Review" if d["action"] == "review" else "Inbox"
+        dest_dir = os.path.join(organised, folder)
+        dest = orgmod.organise_copy(r["source_path"], dest_dir,
+                                    hardlink=bool(cfg.get("hardlink", False)))
+        copies.append(dest)
+        r["organised_path"] = dest
+        orgmod.write_sidecar(dest, r)
+        idx.upsert_file(c, r)
+    orgmod.log_undo(ulog, {"copies": copies, "count": len(copies)})
+    c.close()
+    typer.echo(f"WROTE {len(copies)} copies. Undo with: archivist undo")
+
+
+@app.command()
+def search(query: str, config: str = "config.yaml", limit: int = 20):
+    cfg = load_cfg(config)
+    roles = {}
+    if os.path.exists("people_library.yaml"):
+        with open("people_library.yaml") as f:
+            roles = (yaml.safe_load(f) or {}).get("roles", {})
+    for hit in searchmod.search(cfg.get("index_db", "index.db"), query, roles, limit):
+        typer.echo(f"{hit['organised_path'] or hit['source_path']} :: {hit['reason']}")
+
+
+@app.command()
+def undo(config: str = "config.yaml"):
+    cfg = load_cfg(config)
+    removed = orgmod.undo_last(cfg.get("undo_log", "undo.log"))
+    typer.echo(f"Removed {len(removed)} files")
+
+
+if __name__ == "__main__":
+    app()

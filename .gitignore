@@ -1,0 +1,8 @@
+index.db*
+Organised/
+_review/
+undo.log
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/

@@ -86,11 +86,18 @@ def scan(source: str, dry_run: bool = True, yes: bool = False,
 @app.command()
 def search(query: str, config: str = "config.yaml", limit: int = 20):
     cfg = load_cfg(config)
-    roles = {}
+    # People library: people_library.yaml wins; fall back to config.yaml keys.
+    roles: dict = dict(cfg.get("roles") or {})
+    people: dict = dict(cfg.get("people") or {})
     if os.path.exists("people_library.yaml"):
         with open("people_library.yaml") as f:
-            roles = (yaml.safe_load(f) or {}).get("roles", {})
-    for hit in searchmod.search(cfg.get("index_db", "index.db"), query, roles, limit):
+            lib = yaml.safe_load(f) or {}
+            roles.update(lib.get("roles") or {})
+            people.update(lib.get("people") or {})
+    hits = searchmod.search(cfg.get("index_db", "index.db"), query, roles, limit)
+    if not hits:
+        typer.echo("No matches. (Try fewer/other words, or run a scan first.)")
+    for hit in hits:
         typer.echo(f"{hit['organised_path'] or hit['source_path']} :: {hit['reason']}")
 
 

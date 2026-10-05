@@ -1,5 +1,18 @@
-# People library: confirmed names + org role map (local only, never uploaded)
-people: {}
+# People library: confirmed names + org role map (local only; never uploaded)
+# This file is read by the CLI and attached as `roles` to search hits only.
+# It is NOT part of any model — faces stay on your machine.
+
+# Confirmed people names (add or remove entries)
+people:
+  "Anita Rao": "Managing Director"
+  "Karthik Nair": "Chief Financial Officer"
+  "Priya Menon": "Branch Manager, Indiranagar"
+
+# Optional role code -> person name. During `search`, if the query mentions a
+# role keyword (e.g. "MD letter", "CFO approval"), the role is resolved to the
+# person's name and used as a person filter against the index.
+# Example: searching 'MD signed letter' becomes person="Anita Rao".
 roles:
-  MD: ""
-  CFO: ""
+  MD: "Anita Rao"
+  CFO: "Karthik Nair"
+  BM: "Priya Menon"

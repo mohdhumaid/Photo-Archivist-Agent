@@ -79,6 +79,11 @@ def upsert_file(c: sqlite3.Connection, rec: dict) -> None:
         c.execute("INSERT INTO people(file_id,name,source,conf,box) VALUES(?,?,?,?,?)",
                   (rec.get("file_id"), p.get("name"), p.get("source"),
                    p.get("confidence"), json.dumps(p.get("box"))))
+    # re-scan safety: drop any stale FTS row for this file's rowid first
+    c.execute(
+        "DELETE FROM files_fts WHERE rowid="
+        "(SELECT rowid FROM files WHERE file_id=?)",
+        (rec.get("file_id"),))
     c.execute(
         "INSERT INTO files_fts(rowid,caption,tags,ocr_text,source_path,place_value,event_value)"
         " VALUES((SELECT rowid FROM files WHERE file_id=?),?,?,?,?,?,?)",

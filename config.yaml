@@ -28,7 +28,18 @@ embeddings:
   text_model: all-MiniLM-L6-v2
   image_model: ViT-B-32
 vision:
-  backend: mock   # mock | local
+  backend: mock   # mock | local | llm
+
+# Purple Fabric LLM (optional) — Automation Digital Expert, created in Agent
+# Designer with the Perspective (system prompt) documented in README.md.
+llm:
+  enabled: false            # true -> vision step calls the Purple Fabric agent
+  invoke_url: ""            # POST endpoint of the automation agent (from PF)
+  agent_id: photo-archivist-expert
+  model: claude-sonnet-4-5  # or gpt-5.2 — selected on the agent in PF Agent Designer
+  api_key_env: PURPLE_FABRIC_API_KEY  # key read from this env var, never stored here
+  timeout: 60
+  send_images: false        # false = text-first (privacy); true attaches image bytes
 
 # People library: confirmed names + org role map (local only; never uploaded)
 people: {}

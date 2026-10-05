@@ -14,6 +14,8 @@ class VisionResult:
     face_embeddings: list = field(default_factory=list)  # one 512-d vector per face
     image_vec: list | None = None                        # CLIP embedding, when available
     tags: list = field(default_factory=list)
+    people_hints: list = field(default_factory=list)  # text-grounded names from the LLM
+    pii_flags: list = field(default_factory=list)     # LLM-detected identifiers
     confidences: dict = field(default_factory=dict)
     backend: str = "mock"
 
@@ -37,10 +39,53 @@ class MockVision(VisionBackend):
                             confidences={"caption": 0.1})
 
 
-def get_backend(name: str) -> VisionBackend:
+class LLMVision(VisionBackend):
+    """Purple Fabric Automation Digital Expert — returns mock on any failure."""
+
+    def __init__(self, cfg: dict | None = None):
+        self.cfg = cfg or {}
+
+    def describe(self, path: str, prime: dict) -> VisionResult:
+        import os
+        from . import llm as llmmod
+        variables = {
+            "file_name": prime.get("file_name") or os.path.basename(path),
+            "file_type": prime.get("file_type") or "",
+            "mime": prime.get("mime") or "",
+            "path_segments": prime.get("path_segments") or [],
+            "ocr_text": prime.get("ocr_text") or "",
+            "metadata_json": prime.get("metadata") or {},
+        }
+        llmmod.attach_image(self.cfg, path, variables)
+        out = llmmod.enrich(self.cfg, variables)
+        if not isinstance(out, dict) or not out.get("caption"):
+            return MockVision().describe(path, prime)  # honest fallback
+        try:
+            conf = float(out.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            conf = 0.5
+        conf = min(max(conf, 0.0), 1.0)
+        return VisionResult(
+            caption=str(out.get("caption") or ""),
+            scene=str(out.get("scene") or ""),
+            event_type=str(out.get("event_type") or ""),
+            objects=[str(x) for x in (out.get("objects") or [])][:50],
+            tags=[str(x) for x in (out.get("tags") or [])][:20],
+            people_hints=[str(x) for x in (out.get("people_hints") or [])][:20],
+            pii_flags=[str(x) for x in (out.get("pii_flags") or [])][:20],
+            confidences={"caption": conf, "llm": conf},
+            backend="purple_fabric")
+
+
+def get_backend(name: str, cfg: dict | None = None) -> VisionBackend:
     if name == "mock":
         return MockVision()
-    # local backends (Moondream/LLaVA) plug in here; default to mock when unavailable
+    if name == "llm":
+        from . import llm as llmmod
+        if llmmod.enabled(cfg):
+            return LLMVision(cfg)
+        return MockVision()   # not configured -> mock, never a crash
+    # local backends (insightface/CLIP) plug in here; default to mock when unavailable
     try:
         from .vision_local import LocalVision  # type: ignore
         return LocalVision()

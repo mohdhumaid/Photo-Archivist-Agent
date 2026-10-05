@@ -67,22 +67,7 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
             ocr_text = textmod.ocr_image(path)
         except Exception:
             ocr_text = ""
-    # --- vision (primed) ---
-    vb = vision_backend or visionmod.get_backend((cfg.get("vision") or {}).get("backend", "mock"))
-    prime = {"place": pl.get("value"), "event_hint": " / ".join(segs[-2:]) if segs else ""}
-    vr = vb.describe(path, prime)
-    # --- people: XMP region names + local face matches (when enabled) ---
-    persons = peoplemod.region_names(raw)
-    faces_cfg = cfg.get("faces") or {}
-    if vr.face_embeddings:
-        face_lib = peoplemod.load_face_library(faces_cfg.get("library", "faces_library.json"))
-        if face_lib:
-            thr = float(faces_cfg.get("match_threshold", 0.60))
-            for emb in vr.face_embeddings:
-                m = peoplemod.match_local(emb, face_lib, thr)
-                if m and all(m["name"] != p["name"] for p in persons):
-                    persons.append(m)
-    # --- event/tags from keywords + path ---
+    # --- event/tags from keywords + path (built first: the LLM prime uses them) ---
     tags: list[str] = []
     for k, v in raw.items():
         kl = k.lower()
@@ -93,6 +78,41 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
                 tags.append(str(v))
     tags.extend(segs[-3:])
     event_val = tags[0] if tags else None
+    # --- vision (primed with text-first context; mock | local | llm backend) ---
+    vb = vision_backend or visionmod.get_backend(
+        (cfg.get("vision") or {}).get("backend", "mock"), cfg)
+    prime = {
+        "place": pl.get("value"),
+        "event_hint": " / ".join(segs[-2:]) if segs else "",
+        "file_name": os.path.basename(path),
+        "file_type": det.type, "mime": det.mime,
+        "path_segments": segs,
+        "ocr_text": (ocr_text or "")[:2000],
+        "metadata": {"taken_at": date.get("taken_at"),
+                     "taken_at_source": date.get("source"),
+                     "place": pl.get("value"), "tags": sorted(set(tags))[:20],
+                     "camera": (raw.get("EXIF:Make") or raw.get("Make")),
+                     "photographer": raw.get("IPTC:By-line") or raw.get("XMP-dc:creator")},
+    }
+    vr = vb.describe(path, prime)
+    if vr.tags:                       # LLM-provided tags enrich searchability
+        tags.extend(str(t) for t in vr.tags)
+    # --- people: XMP region names + LLM text hints + local face matches ---
+    persons = peoplemod.region_names(raw)
+    for h in vr.people_hints or []:
+        name = str(h).split(" (")[0].strip()
+        if name and all(name != p["name"] for p in persons):
+            persons.append({"name": name, "source": "llm_text_extract",
+                            "confidence": min(0.9, vr.confidences.get("llm", 0.5))})
+    faces_cfg = cfg.get("faces") or {}
+    if vr.face_embeddings:
+        face_lib = peoplemod.load_face_library(faces_cfg.get("library", "faces_library.json"))
+        if face_lib:
+            thr = float(faces_cfg.get("match_threshold", 0.60))
+            for emb in vr.face_embeddings:
+                m = peoplemod.match_local(emb, face_lib, thr)
+                if m and all(m["name"] != p["name"] for p in persons):
+                    persons.append(m)
     # --- embed (sbert when installed, hash fallback — see embed.py) ---
     emb_backend = (cfg.get("embeddings") or {}).get("backend", "auto")
     txt_vec = embedmod.text_vector(
@@ -100,6 +120,7 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
         backend=emb_backend)
     # --- record (S7) ---
     pii_flags = piimod.scan_text(ocr_text, vr.caption, vr.visible_text)
+    pii_flags += [f"llm:{f}" for f in (vr.pii_flags or [])]
     if not raw:
         meta_status = "stripped"
     elif pl.get("gps") or date.get("confidence", 0) >= 0.8:

@@ -23,10 +23,14 @@ python -m photo_archivist.cli search "loan sanction letters from 2023"
 # 4. Undo last batch
 python -m photo_archivist.cli undo
 
-# 5. Environment readiness (binaries / OpenCV Haar / Purple Fabric / faces library)
+# 5. Enroll face photos (local template embedding, zero model downloads)
+python -m photo_archivist.cli enroll faces                 # bulk folder enrollment
+python -m photo_archivist.cli enroll faces/sanjay\ agarwal.png --name "Sanjay Agarwal"
+
+# 6. Environment readiness (binaries / OpenCV Haar / Purple Fabric / faces library)
 python -m photo_archivist.cli check
 
-# Optional: face-box detection (Haar cascade ships INSIDE the wheel — verify
+# Optional: face-box detection & enrollment (Haar cascade ships INSIDE the wheel — verify
 # your corporate proxy allows PyPI first:  pip download --no-deps opencv-python-headless -d /tmp/t )
 pip install -e .[faces]
 ```
@@ -42,7 +46,7 @@ so this repo ships no `vision_local.py` and no `ai-local` pip extras.
 config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, LLM)
 people_library.yaml     # confirmed names + org role map (MD -> Anita Rao ...)
 faces_library.json      # face-embedding library (LOCAL ONLY, git-ignored; dormant)
-photo_archivist/cli.py  # scan / search / undo
+photo_archivist/cli.py  # scan / search / undo / enroll / check
 photo_archivist/core/
   detect.py fingerprint.py pipeline.py
   metadata/{exif,docs,video,fs,reconcile,place}.py

@@ -1,14 +1,14 @@
 # Photo Archivist Agent
 
 Bank-grade photo/document organiser. Read-only source, copies only, dry-run first,
-every write logged + undoable. Full operating rules: see the spec PDF
-(`OPERATING_CONTEXT.md` once added).
+every write logged + undoable. Full operating rules: see `OPERATING_CONTEXT.md`
+(planned).
 
 ## Quickstart
 
 ```bash
-pip install Pillow ImageHash numpy pypdf pikepdf python-docx openpyxl olefile typer pyyaml pytesseract pytest
-brew install exiftool tesseract poppler   # macOS; apt on Linux
+pip install -e . && pip install pytest
+brew install exiftool tesseract ffmpeg   # ffmpeg provides ffprobe; apt on Linux
 
 # 1. Dry run (writes nothing)
 python -m photo_archivist.cli scan /path/to/source
@@ -32,7 +32,7 @@ so this repo ships no `vision_local.py` and no `ai-local` pip extras.
 ## Layout
 
 ```
-config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, models)
+config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, LLM)
 people_library.yaml     # confirmed names + org role map (MD -> Anita Rao ...)
 faces_library.json      # face-embedding library (LOCAL ONLY, git-ignored; dormant)
 photo_archivist/cli.py  # scan / search / undo
@@ -74,9 +74,13 @@ Two places hold people data — both stay on your machine and are **never upload
 
 1. During `search`, if the query mentions a role keyword (e.g. `MD signed letter`),
    `roles` resolves it to a person name and filters the index by that person —
-   so `search "MD letter"` behaves like `search "Anita Rao letter"`.
+   so `search "MD letter"` behaves like `search "Anita Rao letter"`. Matching is
+   whole-word only (`MD` fires, but `MD` inside another word does not) and empty
+   role values are ignored.
 2. Quoted names in a query (`search '"Anita Rao"'`) are treated as a person filter directly.
-3. `people` names are attached to hits as provenance alongside face/region matches.
+3. `people` titles are appended to matched person names in a hit's reason — e.g.
+   `Anita Rao [xmp_mwg_region] — Managing Director` — alongside region/LLM/face
+   matches stored in `index.db`.
 
 
 ## Facial detection / people model — where to edit
@@ -127,7 +131,8 @@ Organised/Inbox/AkhilVerma.jpeg :: Cline / Images (from path) · 2026-10-05T22:3
 ## Dummy vs live — what changed in code to go real
 
 Most stubs now have **real implementations with graceful fallbacks**: the pipeline always runs,
-and each component upgrades itself automatically when its dependency is installed.
+and each component activates as soon as its dependency or config is present (gazetteer DB file,
+Purple Fabric credentials) — nothing is downloaded automatically.
 
 | # | Component | Status now | Code changes made |
 |---|---|---|---|
@@ -144,6 +149,11 @@ and each component upgrades itself automatically when its dependency is installe
 ### Going live — commands
 
 ```bash
+# 1: Purple Fabric captions/tags/people-hints (only step needing AI):
+export PF_API_KEY='...' PF_USERNAME='...' PF_PASSWORD='...'
+# then in config.yaml: llm.base_url, llm.asset_id, llm.enabled: true,
+#                      vision.backend: llm
+
 # 4: build the offline gazetteer (GeoNames dump; no online calls ever, no AI models)
 curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
 python -c "from photo_archivist.core.place import load_gazetteer; print(load_gazetteer('cities500.txt', 'data/gazetteer.db'))"
@@ -313,16 +323,19 @@ in `confidences.caption`. The parser tolerates markdown fences and prose around 
 - Any network timeout, non-200, or unparseable response → the step **falls back to the mock
   backend** (caption says `mock vision — no claim`). Scans never block on the LLM.
 - `llm.enabled: false` (default) → `vision.backend: llm` silently resolves to mock.
-- API key only via environment variable; `config.yaml` and `faces_library.json`/biometrics
-  are never sent.
+- Credentials are read from **env vars first** (`PF_API_KEY` / `PF_USERNAME` /
+  `PF_PASSWORD`, names configurable via `*_env` keys); the `api_key`/`username`/`password`
+  config fields exist only as a one-off fallback — **never commit real values**.
+  `config.yaml` and `faces_library.json`/biometrics are never sent to any other service.
 
 ## What This Project Does
 
 The Photo Archivist Agent organizes photos and documents into a semantic folder structure. It
-extracts metadata (EXIF, XMP), runs OCR on scanned pages, analyzes visual content, generates tags
-and captions, ranks files into existing folders or flags them for review, and indexes everything so
-it can be searched later. All source files are read-only: the agent copies (or hardlinks) only into
-an `Organised/` output tree and writes no files back to the source.
+extracts metadata (EXIF, XMP), runs OCR on scanned pages, derives tags/events from keywords and
+paths, and — only when the Purple Fabric agent is enabled — generates captions and object tags
+from visual content. Files are ranked into existing learned folders or flagged for review, and
+everything is indexed so it can be searched later. All source files are read-only: the agent
+copies (or hardlinks) only into an `Organised/` output tree and writes no files back to the source.
 
 ## Input / Output
 
@@ -330,11 +343,13 @@ an `Organised/` output tree and writes no files back to the source.
 
 - **Source directory** (`scan /path/to/source`): the folder of photos/documents to organize. The
   source tree itself is never modified.
-- **`config.yaml`**: tunable defaults (thresholds, excludes, OCR backend, model names, etc.).
+- **`config.yaml`**: tunable defaults (thresholds, excludes, OCR, geocoding,
+  Purple Fabric connection, people/roles, etc.).
 - **`people_library.yaml`** (optional): a small local YAML with a `roles` map (`MD`, `CFO`, ...)
   and a `people` map of confirmed names. This is used only to annotate search hits; it is **never
   uploaded** and is not part of the model.
-- **`index.db`**: the existing photo index (created by a previous run) used by `search` and `undo`.
+- **`index.db`**: the existing photo index (created by a previous run) — used by `search`
+  and by `scan` to learn folder profiles. `undo` reads `undo.log`, not the index.
 
 ### Outputs
 
@@ -357,7 +372,7 @@ graph TD
     B --> G[index.py]
     C --> H[ExifTool]
     D --> I[Tesseract]
-    E --> J[(local models)]
+    E --> J[(Purple Fabric asset)]
     B --> K[Organised / .tags.json]
     B --> L[index.db]
     B --> M[undo.log]
@@ -365,5 +380,6 @@ graph TD
 
 The pipeline runs **read-only** against the source, then writes only to the outputs above. The
 `search` command queries `index.db` and attaches a `reason` + `provenance` to every hit. `undo`
-replays `undo.log` in reverse. All local AI (OCR, vision, embeddings) stays on the machine.
-# Photo-Archivist-Agent
+replays `undo.log` in reverse. OCR, hashing and folder learning all run locally and no model is
+ever downloaded; the optional Purple Fabric call is text-first (image bytes only when
+`llm.send_images: true`) and falls back to mock on any failure.

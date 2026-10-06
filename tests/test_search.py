@@ -50,3 +50,37 @@ def test_search_reason_has_provenance(tmp_path):
     hits = searchmod.search(db, "Akhil")
     assert "from path" in hits[0]["reason"] and "from exif" in hits[0]["reason"]
     assert "text match: Akhil" in hits[0]["reason"]
+
+
+def test_role_match_is_whole_word_only():
+    # documented behaviour: "MD letter" resolves MD -> person name
+    f = searchmod.parse_query("MD signed letter", {"MD": "Anita Rao"})
+    assert f["person"] == "Anita Rao"
+    # substring traps: role must not fire inside another word; empty values ignored
+    f2 = searchmod.parse_query("bmw photos", {"BM": "Nobody"})
+    assert not f2["person"]
+    f3 = searchmod.parse_query("cmd tools", {"MD": "Anita Rao"})
+    assert not f3["person"]
+    f4 = searchmod.parse_query("anything", {"MD": ""})
+    assert not f4["person"]
+
+
+def test_people_map_title_annotates_reason(tmp_path):
+    db = str(tmp_path / "i.db")
+    c = idx.connect(db)
+    rec = {"file_id": "p1", "sha256": "c" * 64,
+           "source_path": "/src/Anita-Rao.png", "type": "image",
+           "caption": "office photo", "tags": ["office"],
+           "ocr_text": "letter signed by Anita Rao",
+           "place": {"value": "Indiranagar", "source": "path"},
+           "event": {"value": None}, "taken_at": None, "taken_at_source": None,
+           "taken_at_confidence": 0.3,
+           "people": [{"name": "Anita Rao", "source": "xmp_mwg_region",
+                       "confidence": 0.99}]}
+    idx.upsert_file(c, rec)
+    c.close()
+    hits = searchmod.search(db, "Anita",
+                            people_map={"Anita Rao": "Managing Director"})
+    assert len(hits) == 1
+    assert "Anita Rao [xmp_mwg_region]" in hits[0]["reason"]
+    assert "Managing Director" in hits[0]["reason"]

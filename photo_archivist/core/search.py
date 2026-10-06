@@ -30,9 +30,11 @@ def parse_query(q: str, role_map: dict | None = None) -> dict:
             # single-word queries like 'videos' clearly mean type.
             f["type"] = mapped
             break
+    # whole-word role match only ("MD letter" yes, "BM" inside "bmw" no)
     for role, name in (role_map or {}).items():
-        if role.lower() in low:
+        if role and name and re.search(rf"\b{re.escape(str(role).lower())}\b", low):
             f["person"] = name
+            break
     # quoted person heuristic
     m2 = re.search(r'"([^"]+)"', q)
     if m2 and not f["person"]:
@@ -43,7 +45,8 @@ def parse_query(q: str, role_map: dict | None = None) -> dict:
     return f
 
 
-def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 20) -> list[dict]:
+def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 20,
+           people_map: dict | None = None) -> list[dict]:
     filt = parse_query(query, role_map)
     # Short queries ("MR", "MD") are dropped by the len>2 term rule — fall back
     # to the raw query as one substring term so we never return everything.
@@ -104,7 +107,11 @@ def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 
         if r["place_value"]:
             reason_bits.append(f"{r['place_value']} (from {r['place_source']})")
         if ppl:
-            reason_bits.append(", ".join(p[0] + f" [{p[1]}]" for p in ppl))
+            # annotate matched names with their library titles (people: map)
+            reason_bits.append(", ".join(
+                p[0] + f" [{p[1]}]"
+                + (f" — {(people_map or {}).get(p[0])}" if (people_map or {}).get(p[0]) else "")
+                for p in ppl))
         if r["taken_at"]:
             reason_bits.append(f"{r['taken_at']} (from {r['taken_at_source']})")
         if filt["terms"]:

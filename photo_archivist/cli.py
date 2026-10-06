@@ -108,7 +108,8 @@ def search(query: str, config: str = "config.yaml", limit: int = 20):
             lib = yaml.safe_load(f) or {}
             roles.update(lib.get("roles") or {})
             people.update(lib.get("people") or {})
-    hits = searchmod.search(cfg.get("index_db", "index.db"), query, roles, limit)
+    hits = searchmod.search(cfg.get("index_db", "index.db"), query, roles, limit,
+                            people_map=people)
     if not hits:
         typer.echo("No matches. (Try fewer/other words, or run a scan first.)")
     for hit in hits:

@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ocr = ["pytesseract>=0.3"]
+faces = ["opencv-python-headless>=4.9"]   # Haar cascade ships inside the wheel
 test = ["pytest>=8"]
 
 [tool.pytest.ini_options]

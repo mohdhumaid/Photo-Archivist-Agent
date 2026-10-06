@@ -59,7 +59,8 @@ def scan(source: str, dry_run: bool = True, yes: bool = False,
                                set(p["name"] for p in r["people"] or []),
                                profiles, th.get("promote", 0.80),
                                th.get("review_low", 0.60)) for r in records]
-    rep = reportmod.build_report(records, decisions)
+    rep = reportmod.build_report(records, decisions,
+                                 int(cfg.get("unnamed_face_ask_N", 3) or 3))
     typer.echo(json.dumps(rep, indent=2, default=str))
     if dry_run:
         typer.echo("DRY RUN — nothing written. Re-run with --no-dry-run --yes to apply.")
@@ -122,6 +123,45 @@ def undo(config: str = "config.yaml"):
     removed = orgmod.undo_last(cfg.get("undo_log", "undo.log"))
     typer.echo(f"Removed {len(removed)} files")
 
+
+
+@app.command()
+def check():
+    """Environment readiness: binaries, OpenCV Haar, Purple Fabric config."""
+    import shutil
+    pkg = {"ffprobe": "ffmpeg"}
+    required_ok = True
+    for exe in ("exiftool", "tesseract", "ffprobe"):
+        p = shutil.which(exe)
+        hint = pkg.get(exe, exe)
+        typer.echo(f"{exe:10s} {'OK   ' + p if p else 'MISSING — brew install ' + hint}")
+        required_ok = required_ok and bool(p)
+    from .core import faces as facemod
+    fok, msg = facemod.available()
+    typer.echo(f"{'haar':10s} {'OK   ' if fok else 'ABSENT'} {msg}")
+    if not fok:
+        typer.echo("           install once: pip install opencv-python-headless")
+        typer.echo("           (the Haar cascade XML ships INSIDE that wheel — no other download)")
+    cfg = load_cfg()
+    from .core import llm as llmmod
+    if llmmod.enabled(cfg):
+        token = llmmod.get_access_token(cfg, force=True)
+        typer.echo(f"{'purplefabric':10s} {'OK   token acquired' if token else 'FAILED — check base_url / credentials'}")
+    else:
+        typer.echo(f"{'purplefabric':10s} disabled (llm.enabled: false)")
+    # faces_library.json: location + contents summary (dormant until embeddings exist)
+    lib_path = (cfg.get("faces") or {}).get("library", "faces_library.json")
+    if os.path.exists(lib_path):
+        import json
+        try:
+            with open(lib_path) as f:
+                n_faces = len(json.load(f) or {})
+            typer.echo(f"{'faceslib':10s} {os.path.abspath(lib_path)} ({n_faces} enrolled)")
+        except Exception:
+            typer.echo(f"{'faceslib':10s} {os.path.abspath(lib_path)} (unreadable JSON)")
+    else:
+        typer.echo(f"{'faceslib':10s} {os.path.abspath(lib_path)} (not created yet)")
+    raise typer.Exit(0 if required_ok else 1)
 
 
 if __name__ == "__main__":

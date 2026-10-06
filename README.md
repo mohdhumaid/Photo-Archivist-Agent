@@ -22,6 +22,13 @@ python -m photo_archivist.cli search "loan sanction letters from 2023"
 
 # 4. Undo last batch
 python -m photo_archivist.cli undo
+
+# 5. Environment readiness (binaries / OpenCV Haar / Purple Fabric / faces library)
+python -m photo_archivist.cli check
+
+# Optional: face-box detection (Haar cascade ships INSIDE the wheel — verify
+# your corporate proxy allows PyPI first:  pip download --no-deps opencv-python-headless -d /tmp/t )
+pip install -e .[faces]
 ```
 
 The default `mock` vision backend makes zero claims. The only sanctioned AI is the
@@ -39,7 +46,7 @@ photo_archivist/cli.py  # scan / search / undo
 photo_archivist/core/
   detect.py fingerprint.py pipeline.py
   metadata/{exif,docs,video,fs,reconcile,place}.py
-  text.py vision.py llm.py people.py place.py embed.py
+  text.py vision.py llm.py faces.py people.py place.py embed.py
   index.py decide.py organise.py search.py report.py pii.py
 tests/  sample_data/  data/
 ```
@@ -94,21 +101,82 @@ filled from sources that exist:
 2. **Purple Fabric text hints** (works when enabled): the PF agent returns
    `people_hints` — names literally present in OCR text or filenames — recorded with
    `source: llm_text_extract` at confidence ≤ 0.9.
-3. **Local face recognition** (⚠️ **blocked by org policy**): no model downloads are
-   allowed, so `vision_local.py` was removed and `vision.backend: local` resolves to
-   `mock`. The matching code (`people.py::match_local`, `faces_library.json`, the
-   pipeline wiring) stays in place and dormant — it activates only in an environment
-   where a local face model is permitted.
+3. **Face detection — boxes only** (✅ live with OpenCV Haar): `faces.py::detect_faces()`
+   counts faces and stores `face_boxes` in the record/sidecar. It answers *how many,
+   where* — never *who*: no embeddings are produced. Install once with
+   `pip install opencv-python-headless` (the cascade XML ships inside the wheel, so
+   there is no runtime download). The scan report then shows `faces_pct` and raises
+   `UNNAMED-FACE` questions when ≥ `unnamed_face_ask_N` faces have no names.
+4. **Face recognition — identity** (⚠️ **dormant, needs an approved embedding source**):
+   cosine-matching against `faces_library.json` (`people.py::match_local`) requires
+   512-number face embeddings. Producing embeddings needs a recognition model, which
+   org policy blocks — so detection runs, matching waits. The wiring stays in place and
+   activates the moment embeddings become available.
 
 | What to do | Where / how |
 |---|---|
 | Populate people from files that already carry names | nothing to do — XMP/EXIF regions are read automatically |
 | Populate people from OCR-visible names | `vision.backend: llm` + `llm.enabled: true` (Purple Fabric section) |
-| Face embeddings library path | `config.yaml` → `faces.library: faces_library.json` (used when face embeddings ever exist) |
+| Install face detection | `pip install -e .[faces]` → `python -m photo_archivist.cli check` confirms the bundled cascade |
 | Face match strictness | `config.yaml` → `faces.match_threshold: 0.60`, `faces.local_only: true` |
+| Raise unnamed-face questions | `config.yaml` → `unnamed_face_ask_N: 3` (ask when ≥ N faces, none named) |
 
-Faces are **local-only** (`faces.local_only: true`): embeddings never leave the machine and
-`faces_library.json` is excluded from git.
+Faces are **local-only** (`faces.local_only: true`): detection runs on your machine,
+embeddings never leave it, and `faces_library.json` is excluded from git.
+
+### `faces_library.json` — where it lives (sample)
+
+The path comes from `config.yaml → faces.library`. It is resolved **relative to the folder
+you run the CLI from** (normally the repo root):
+
+```
+Photo-Archivist-Agent/            ← run commands from here
+├── config.yaml                   ← faces.library: faces_library.json
+├── people_library.yaml
+├── faces_library.json            ← HERE (git-ignored, created by you)
+├── photo_archivist/
+└── ...
+```
+
+Sample contents — a flat JSON object, person name → 512-float face embedding:
+
+```json
+{
+  "Anita Rao":     [0.0231, -0.1145, 0.0562, "... 512 floats total ...", 0.0872],
+  "Karthik Nair":  [-0.0412, 0.0933, 0.0117, "...", -0.0550]
+}
+```
+
+Each vector is compared by cosine similarity at `faces.match_threshold: 0.60`. Right now
+the file can exist but stays quiet: Haar detection yields boxes only, so there are no
+embeddings to compare against. It gets populated later from an embedding source your
+organization approves (e.g. vectors returned by the Purple Fabric asset) — never from a
+downloaded model under current policy.
+
+### Can I install OpenCV Haar on my company laptop? (run these first)
+
+Nothing runs at runtime except the already-installed wheel — but verify your proxy allows
+PyPI **once**:
+
+```bash
+# 1. Is PyPI reachable through your corporate proxy?
+curl -sI https://pypi.org/simple/opencv-python-headless/ | head -1        # expect HTTP/2 200
+
+# 2. Test the DOWNLOAD only (no install, ~60 MB wheel)
+pip download --no-deps opencv-python-headless -d /tmp/pf_check && echo ALLOWED || echo BLOCKED
+
+# 3. Install (or: pip install -e .[faces])
+pip install opencv-python-headless
+
+# 4. Prove the cascade ships INSIDE the wheel — no second, model-like download:
+python -c "import cv2, os; p=os.path.join(cv2.data.haarcascades,'haarcascade_frontalface_default.xml'); print(p, '->', os.path.exists(p))"
+
+# 5. One-shot verdict from the agent itself:
+python -m photo_archivist.cli check
+```
+
+If step 2 prints `BLOCKED`, face detection is unavailable and the pipeline still runs
+(degradation is automatic — `face_boxes` stays empty).
 
 ## Reading the `search` output
 
@@ -140,7 +208,7 @@ Purple Fabric credentials) — nothing is downloaded automatically.
 | 2 | **Text embeddings** | ✅ **Local hash by policy** — deterministic, no downloads | `embed.py` is hash-only (128-dim bag-of-words): sentence-transformers was **removed** because it downloads a Hugging Face model. Semantic understanding comes from the Purple Fabric agent's tags/captions instead. `pipeline.py` still passes `cfg.embeddings.backend` for forwards compatibility (only `hash` is supported). |
 | 3 | **Image embeddings** | ⛔ **Removed by org policy** — CLIP downloads a model | `vision_local.py` was deleted; `vectors.image` stays `null`. Visual similarity is therefore inert; similarity signals come from tags/OCR instead. |
 | 4 | **Reverse geocoding** | ✅ **Live** — real SQLite gazetteer lookup | **`place.py` rewritten**: `reverse_geocode()` queries `geonames(lat,lon)` within ±0.5° (confidence 0.9) when the DB exists, else the old stub. **New** `load_gazetteer(tsv, db)` builds the DB from a GeoNames dump. `pipeline.py` now passes `cfg.geocode.offline_db`. |
-| 5 | **Face recognition** | ⛔ **Blocked by org policy** — local face models can't be downloaded | `vision_local.py` deleted; `enroll` CLI removed; `ai-local` pip extras removed from `pyproject.toml`. Remaining live people sources: embedded XMP names + Purple Fabric `people_hints`. The matcher (`people.py::match_local`, dormant in `pipeline.py`) reactivates automatically if face embeddings ever exist. |
+| 5 | **Face detection / recognition** | ✅ **Detection live** (OpenCV Haar) · ⛔ recognition dormant | **New** `faces.py`: `detect_faces()` counts face boxes via the Haar cascade bundled in `opencv-python-headless` (zero runtime downloads) → stored as `face_boxes` in records/sidecars; report gains `faces_pct` + `UNNAMED-FACE` questions (`unnamed_face_ask_N`); **new** `check` CLI verifies install. Identity matching (`match_local` + `faces_library.json`) still needs an embedding source — blocked by policy until approved. |
 | 6 | **Folder learning** | ✅ **Live** — pure code, fully active today | **`index.py`**: `profile_from_records()`, `upsert_folder()`, `load_folders()` (uses the existing `folders` table). **`cli.py scan`**: loads learned profiles before `decide()`, files promoted files into the learned folder (not always `Inbox`), then persists updated profiles after apply — so `thresholds.promote: 0.80` now actually fires on re-scans. |
 | 7 | **Role placeholders** | 📝 **User data** | Not code — put real names in `config.yaml → roles` or `people_library.yaml` (see *People library* above). |
 | 8 | **OCR** | ✅ Already live (`tesseract`) | Nothing to change. |

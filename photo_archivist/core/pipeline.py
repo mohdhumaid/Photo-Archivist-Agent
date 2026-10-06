@@ -16,6 +16,7 @@ from . import people as peoplemod
 from . import place as placelib
 from . import embed as embedmod
 from . import pii as piimod
+from . import faces as facesmod
 
 
 def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
@@ -113,6 +114,8 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
                 m = peoplemod.match_local(emb, face_lib, thr)
                 if m and all(m["name"] != p["name"] for p in persons):
                     persons.append(m)
+    # --- faces: OpenCV Haar detection (boxes only; identity matching dormant) ---
+    face_boxes = facesmod.detect_faces(path) if det.type == "image" else []
     # --- embed (local hash only — org policy forbids model downloads) ---
     emb_backend = (cfg.get("embeddings") or {}).get("backend", "hash")
     txt_vec = embedmod.text_vector(
@@ -135,7 +138,7 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
         "taken_at_confidence": date.get("confidence"),
         "timezone_source": date.get("timezone_source"),
         "place": {k: v for k, v in pl.items() if k != "needs_geocode"},
-        "people": persons,
+        "people": persons, "face_boxes": face_boxes,
         "event": {"value": event_val, "source": "iptc_keywords|path" if event_val else None,
                   "confidence": 0.7 if event_val else 0.0},
         "caption": vr.caption, "tags": sorted(set(tags)),

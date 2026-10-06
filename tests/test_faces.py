@@ -92,7 +92,7 @@ def test_enroll_folder_and_match(tmp_path):
         data = json.load(f)
     assert "Sanjay Agarwal" in data
     assert "Uttam Tibrewal" in data
-    assert len(data["Sanjay Agarwal"]) == facemod.EMBED_SIZE * facemod.EMBED_SIZE
+    assert len(data["Sanjay Agarwal"]) in (128, facemod.EMBED_SIZE * facemod.EMBED_SIZE)
     # Self-match should score 1.00
     m = peoplemod.match_local(data["Sanjay Agarwal"], data, threshold=0.95)
     assert m is not None

@@ -28,24 +28,43 @@ def region_names(raw: dict) -> list[dict]:
     return people
 
 
-def match_local(embedding: list | None, library: dict, threshold: float = 0.60) -> dict | None:
-    """Cosine match against local people library. Returns match or None."""
+def match_local(embedding: list | None, library: dict, threshold: float = 0.45, min_margin: float = 0.05) -> dict | None:
+    """Cosine match against local people library with margin separation verification.
+
+    Returns match dict or None when confidence is below threshold or ambiguous.
+    """
     if not embedding or not library:
         return None
     import math
-    best, best_s = None, -1.0
+    scores: list[tuple[str, float]] = []
+    na = math.sqrt(sum(a * a for a in embedding)) or 1.0
+
     for name, vec in library.items():
+        if len(vec) != len(embedding):
+            continue
         try:
             dot = sum(a * b for a, b in zip(embedding, vec))
-            na = math.sqrt(sum(a * a for a in embedding)) or 1.0
             nb = math.sqrt(sum(b * b for b in vec)) or 1.0
             s = dot / (na * nb)
+            scores.append((name, s))
         except Exception:
             continue
-        if s > best_s:
-            best, best_s = name, s
-    if best and best_s >= threshold:
-        return {"name": best, "source": "face_match_local", "confidence": round(float(best_s), 3)}
+
+    if not scores:
+        return None
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    best_name, best_s = scores[0]
+    second_s = scores[1][1] if len(scores) > 1 else 0.0
+
+    # Margin separation check: avoid ambiguous / near-tied matches
+    margin = best_s - second_s
+    if best_s >= threshold and (len(scores) == 1 or margin >= min_margin):
+        return {
+            "name": best_name,
+            "source": "face_match_local",
+            "confidence": round(float(best_s), 3),
+        }
     return None
 
 

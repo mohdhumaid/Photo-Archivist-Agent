@@ -113,17 +113,16 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
             m = peoplemod.match_local(emb, face_lib, thr)
             if m and all(m["name"] != p["name"] for p in persons):
                 persons.append(m)
-    # --- faces: OpenCV Haar detection + local template matching ---
-    face_boxes = facesmod.detect_faces(path) if det.type == "image" else []
+    # --- faces: OpenCV YuNet / Haar detection + deep SFace / template matching ---
+    face_boxes = facesmod.detect_faces(path, cfg) if det.type == "image" else []
     if face_lib and det.type == "image" and face_boxes:
         for fb in face_boxes:
-            box = fb.get("box") if isinstance(fb, dict) else fb
-            if box:
-                vec = facesmod.crop_vector(path, box)
-                if vec:
-                    m = peoplemod.match_local(vec, face_lib, thr)
-                    if m and all(m["name"] != p["name"] for p in persons):
-                        persons.append(m)
+            face_info = fb if isinstance(fb, dict) else {"box": fb}
+            vec = facesmod.embed_face(path, face_info, cfg)
+            if vec:
+                m = peoplemod.match_local(vec, face_lib, thr)
+                if m and all(m["name"] != p["name"] for p in persons):
+                    persons.append(m)
     # --- embed (local hash only — org policy forbids model downloads) ---
     emb_backend = (cfg.get("embeddings") or {}).get("backend", "hash")
     txt_vec = embedmod.text_vector(

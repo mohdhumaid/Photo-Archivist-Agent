@@ -106,16 +106,24 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
             persons.append({"name": name, "source": "llm_text_extract",
                             "confidence": min(0.9, vr.confidences.get("llm", 0.5))})
     faces_cfg = cfg.get("faces") or {}
-    if vr.face_embeddings:
-        face_lib = peoplemod.load_face_library(faces_cfg.get("library", "faces_library.json"))
-        if face_lib:
-            thr = float(faces_cfg.get("match_threshold", 0.60))
-            for emb in vr.face_embeddings:
-                m = peoplemod.match_local(emb, face_lib, thr)
-                if m and all(m["name"] != p["name"] for p in persons):
-                    persons.append(m)
-    # --- faces: OpenCV Haar detection (boxes only; identity matching dormant) ---
+    face_lib = peoplemod.load_face_library(faces_cfg.get("library", "faces_library.json"))
+    thr = float(faces_cfg.get("match_threshold", 0.60))
+    if vr.face_embeddings and face_lib:
+        for emb in vr.face_embeddings:
+            m = peoplemod.match_local(emb, face_lib, thr)
+            if m and all(m["name"] != p["name"] for p in persons):
+                persons.append(m)
+    # --- faces: OpenCV Haar detection + local template matching ---
     face_boxes = facesmod.detect_faces(path) if det.type == "image" else []
+    if face_lib and det.type == "image" and face_boxes:
+        for fb in face_boxes:
+            box = fb.get("box") if isinstance(fb, dict) else fb
+            if box:
+                vec = facesmod.crop_vector(path, box)
+                if vec:
+                    m = peoplemod.match_local(vec, face_lib, thr)
+                    if m and all(m["name"] != p["name"] for p in persons):
+                        persons.append(m)
     # --- embed (local hash only — org policy forbids model downloads) ---
     emb_backend = (cfg.get("embeddings") or {}).get("backend", "hash")
     txt_vec = embedmod.text_vector(

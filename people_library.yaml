@@ -4,15 +4,24 @@
 
 # Confirmed people names (add or remove entries)
 people:
+  "Sanjay Agarwal": "Managing Director & CEO"
+  "Uttam Tibrewal": "Executive Director & Deputy CEO"
+  "Akhil Verma": "Head of Branch Banking"
+  "Anmol Padhye": "Head - Credit Risk"
+  "Yogesh Jain": "Head of Operations"
+  "Yogesh Soni": "Head - Internal Audit"
   "Anita Rao": "Managing Director"
   "Karthik Nair": "Chief Financial Officer"
   "Priya Menon": "Branch Manager, Indiranagar"
 
 # Optional role code -> person name. During `search`, if the query mentions a
-# role keyword (e.g. "MD letter", "CFO approval"), the role is resolved to the
+# role keyword (e.g. "MD letter", "CEO photo", "ED review"), the role is resolved to the
 # person's name and used as a person filter against the index.
-# Example: searching 'MD signed letter' becomes person="Anita Rao".
+# Example: searching 'MD signed letter' becomes person="Sanjay Agarwal".
 roles:
-  MD: "Anita Rao"
+  MD: "Sanjay Agarwal"
+  CEO: "Sanjay Agarwal"
+  ED: "Uttam Tibrewal"
+  DeputyCEO: "Uttam Tibrewal"
   CFO: "Karthik Nair"
   BM: "Priya Menon"

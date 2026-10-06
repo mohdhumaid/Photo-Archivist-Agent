@@ -124,6 +124,29 @@ def undo(config: str = "config.yaml"):
     typer.echo(f"Removed {len(removed)} files")
 
 
+@app.command()
+def enroll(target: str, name: str = "", config: str = "config.yaml"):
+    """Enroll a face image or an entire folder of photos into faces_library.json."""
+    cfg = load_cfg(config)
+    lib_path = (cfg.get("faces") or {}).get("library", "faces_library.json")
+    from .core import faces as facemod
+    if os.path.isdir(target):
+        res = facemod.enroll_folder(target, lib_path)
+        typer.echo(f"Enrolled folder '{target}' -> {lib_path}:")
+        for person, status in res.items():
+            typer.echo(f"  {person:25s}: {status}")
+    elif os.path.isfile(target):
+        person_name = name or facemod.clean_name(target)
+        ok = facemod.enroll_file(target, person_name, lib_path)
+        if ok:
+            typer.echo(f"Enrolled '{person_name}' from {target} into {lib_path}")
+        else:
+            typer.echo(f"FAILED: no face detected in {target}")
+            raise typer.Exit(1)
+    else:
+        typer.echo(f"Target not found: {target}")
+        raise typer.Exit(1)
+
 
 @app.command()
 def check():

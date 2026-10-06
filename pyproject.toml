@@ -25,5 +25,9 @@ ocr = ["pytesseract>=0.3"]
 faces = ["opencv-python-headless>=4.9"]   # Haar cascade ships inside the wheel
 test = ["pytest>=8"]
 
+[tool.setuptools.packages.find]
+include = ["photo_archivist*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

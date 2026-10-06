@@ -1,4 +1,5 @@
 """OpenCV Haar face detection tests (skip gracefully when opencv absent)."""
+import os
 import pytest
 from photo_archivist.core import faces as facemod
 from photo_archivist.core import report as reportmod
@@ -68,3 +69,32 @@ def test_pipeline_record_includes_face_boxes(tmp_path):
     doc.save(str(p))
     rec = pipe.process_file(str(p), {"embeddings": {"backend": "hash"}})
     assert rec["face_boxes"] == []
+
+
+def test_clean_name_normalisation():
+    assert facemod.clean_name("AkhilVerma.jpeg") == "Akhil Verma"
+    assert facemod.clean_name("Anmol-Padhye.png") == "Anmol Padhye"
+    assert facemod.clean_name("sanjay agarwal.png") == "Sanjay Agarwal"
+    assert facemod.clean_name("uttamtibrewal.png") == "Uttam Tibrewal"
+    assert facemod.clean_name("Yogesh-Jain.png") == "Yogesh Jain"
+    assert facemod.clean_name("Yogesh-Soni.png") == "Yogesh Soni"
+
+
+def test_enroll_folder_and_match(tmp_path):
+    import json
+    from photo_archivist.core import people as peoplemod
+    lib_path = str(tmp_path / "test_faces.json")
+    results = facemod.enroll_folder("faces", lib_path=lib_path)
+    if not results:
+        pytest.skip("faces/ folder not present or empty")
+    assert os.path.exists(lib_path)
+    with open(lib_path) as f:
+        data = json.load(f)
+    assert "Sanjay Agarwal" in data
+    assert "Uttam Tibrewal" in data
+    assert len(data["Sanjay Agarwal"]) == facemod.EMBED_SIZE * facemod.EMBED_SIZE
+    # Self-match should score 1.00
+    m = peoplemod.match_local(data["Sanjay Agarwal"], data, threshold=0.95)
+    assert m is not None
+    assert m["name"] == "Sanjay Agarwal"
+    assert m["confidence"] == 1.0

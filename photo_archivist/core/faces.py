@@ -17,6 +17,10 @@ import json
 import os
 import re
 
+# Mute OpenCV DNN graph-engine warnings (setPreferableTarget notice) at import
+# time — the env var is read when cv2 is first imported, so set it early.
+os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
+
 CASCADE_NAME = "haarcascade_frontalface_default.xml"
 YUNET_MODEL_DEFAULT = "models/face_detection_yunet_2023mar.onnx"
 SFACE_MODEL_DEFAULT = "models/face_recognition_sface_2021dec.onnx"
@@ -110,6 +114,7 @@ def detect_faces(path: str, cfg: dict | None = None) -> list[dict]:
         import cv2
     except ImportError:
         return []
+    _quiet_opencv()
 
     det_model, rec_model = get_model_paths(cfg)
 
@@ -165,6 +170,7 @@ def embed_face(path: str, face_info: dict | None = None, cfg: dict | None = None
         import numpy as np
     except ImportError:
         return None
+    _quiet_opencv()
 
     det_model, rec_model = get_model_paths(cfg)
     if rec_model and hasattr(cv2, "FaceRecognizerSF"):

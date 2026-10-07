@@ -202,10 +202,19 @@ def check():
     import shutil
     pkg = {"ffprobe": "ffmpeg"}
     required_ok = True
+    win = os.name == "nt"
     for exe in ("exiftool", "tesseract", "ffprobe"):
         p = shutil.which(exe)
-        hint = pkg.get(exe, exe)
-        typer.echo(f"{exe:10s} {'OK   ' + p if p else 'MISSING — brew install ' + hint}")
+        if p:
+            typer.echo(f"{exe:10s} OK   {p}")
+            continue
+        if win:
+            tip = {"exiftool": "winget install exiftool",
+                   "ffprobe": "winget install Gyan.FFmpeg",
+                   "tesseract": "winget install UB-Mannheim.TesseractOCR"}.get(exe, exe)
+        else:
+            tip = f"brew install {pkg.get(exe, exe)}"
+        typer.echo(f"{exe:10s} MISSING — {tip}")
         required_ok = required_ok and bool(p)
     from .core import faces as facemod
     fok, msg = facemod.available()
@@ -250,8 +259,14 @@ def check():
         import json
         try:
             with open(lib_path) as f:
-                n_faces = len(json.load(f) or {})
-            typer.echo(f"{'faceslib':10s} {os.path.abspath(lib_path)} ({n_faces} enrolled)")
+                lib = json.load(f) or {}
+            n_faces = len(lib)
+            from collections import Counter
+            dims = Counter(len(v) for v in lib.values() if isinstance(v, list))
+            dim_str = ", ".join(f"{d}-dim x{c}" for d, c in sorted(dims.items())) or "no vectors"
+            mixed = " — MIXED DIMS: re-enroll all faces" if len(dims) > 1 else ""
+            typer.echo(f"{'faceslib':10s} {os.path.abspath(lib_path)} "
+                       f"({n_faces} enrolled; {dim_str}){mixed}")
         except Exception:
             typer.echo(f"{'faceslib':10s} {os.path.abspath(lib_path)} (unreadable JSON)")
     else:

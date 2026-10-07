@@ -103,6 +103,10 @@ def _secret(c: dict) -> str:
     # 1) .env file next to config.yaml  2) real env var  3) config fallback
     _load_dotenv()
     env_var = str(c.get("api_key_env") or "").strip()
+    if env_var.startswith("sk-"):
+        # misconfigured: the TOKEN itself was pasted into api_key_env —
+        # use it directly so the gateway still gets a Bearer header.
+        return env_var
     return os.environ.get(env_var, "") or str(c.get("api_key") or "")
 
 

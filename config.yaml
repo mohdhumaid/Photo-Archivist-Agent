@@ -21,23 +21,23 @@ geocode:
   offline_db: data/gazetteer.db
 faces:
   local_only: true
-  match_threshold: 0.60
+  match_threshold: 0.40   # SFace FR_COSINE official threshold is 0.363; 0.60 never matched
   library: faces_library.json   # local-only biometrics (git-ignored)
 embeddings:
   backend: hash    # local hash ONLY — org policy forbids model downloads
 vision:
-  backend: mock   # mock | vllm  (vllm = local vLLM or LiteLLM gateway; llm = legacy alias of vllm)
+  backend: vllm   # mock | vllm  (vllm = local vLLM or LiteLLM gateway; llm = legacy alias of vllm)
 
 # Local / gateway vision LLM — OpenAI-compatible /chat/completions.
 # Pick ONE of the two blocks below.
 vision_llm:
-  enabled: false
-  # --- Option A: self-hosted vLLM (Qwen3-VL, OpenAI-style, usually no key) ---
-  base_url: "http://127.0.0.1:8000/v1/chat/completions"
-  model: "Qwen/Qwen3-VL-8B-Thinking-FP8"
-  # --- Option B: LiteLLM gateway (Bearer key). Uncomment + set env, e.g. ---
-  # base_url: "https://<gateway-host>/apillmgov/v1/chat/completions"
-  # model: "claude-sonnet-4-6"
+  enabled: true
+  # LiteLLM gateway (Bearer key from .env -> LLM_API_KEY; never in this file)
+  base_url: "https://dev-broccoli-apillmgov.auuat.bank.in/apillmgov/v1/chat/completions"
+  model: "Qwen3 Vision 235b"
+  # --- Option A alternative: self-hosted vLLM (usually no key) ---
+  # base_url: "http://127.0.0.1:8000/v1/chat/completions"
+  # model: "Qwen/Qwen3-VL-8B-Thinking-FP8"
   api_key_env: LLM_API_KEY   # export LLM_API_KEY='sk-...' — never store secrets here
   api_key: ""                # fallback if env var unset — do NOT commit real values
   temperature: 0.2

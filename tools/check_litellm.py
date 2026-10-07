@@ -22,14 +22,41 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Read LLM_API_KEY (key=val) from .env into os.environ, if present."""
+    here = os.path.abspath(os.getcwd())
+    candidates = [os.path.join(here, path)]
+    for _ in range(3):
+        here = os.path.dirname(here)
+        candidates.append(os.path.join(here, path))
+    for cand in candidates:
+        if not os.path.isfile(cand):
+            continue
+        try:
+            with open(cand, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    k, v = k.strip(), v.strip()
+                    if len(v) >= 2 and v[0] == v[-1] and v[0] in ""'":
+                        v = v[1:-1]
+                    os.environ.setdefault(k, v)
+            return
+        except OSError:
+            continue
+
+
 def main() -> int:
+    load_dotenv()
     args = build_parser().parse_args()
 
     api_key = args.api_key or os.environ.get("LLM_API_KEY", "")
 
     if not api_key:
         print("ERROR: API key missing")
-        print("Use --api-key or set LLM_API_KEY environment variable")
+        print("Use --api-key, put LLM_API_KEY=<token> in .env, or set the env var")
         return 2
 
     content = [

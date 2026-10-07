@@ -9,3 +9,4 @@ __pycache__/
 .DS_Store
 faces_library.json
 .pytest_cache/
+.env

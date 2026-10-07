@@ -3,6 +3,7 @@ import os
 import pytest
 from photo_archivist.core import faces as facemod
 from photo_archivist.core import report as reportmod
+from photo_archivist.core import people as peoplemod
 
 
 def test_detect_faces_never_raises(tmp_path):
@@ -124,3 +125,40 @@ def test_persons_for_faces_empty_detections_but_regions_kept():
     from photo_archivist.core import people as peoplemod
     persons, unnamed = peoplemod.persons_for_faces([], {}, {}, threshold=0.6)
     assert persons == [] and unnamed == 0
+
+def test_filename_hint_enrolled_and_unenrolled():
+    """'sanjay agarwal.png' names the face from the filename."""
+    det = [{"box": [10, 10, 50, 50], "embedding": [0.0] * 128}]
+    # enrolled name matches filename -> 0.60, face_filename
+    persons, unnamed = peoplemod.persons_for_faces(
+        det, {}, {"Sanjay Agarwal": [0.0] * 128}, threshold=0.99,
+        path="D:\AI Project\faces\sanjay agarwal.png")
+    assert persons[0]["name"] == "Sanjay Agarwal"
+    assert persons[0]["source"] == "face_filename"
+    assert persons[0]["confidence"] == 0.60
+    assert unnamed == 0
+    # plausible but not enrolled -> still named, lower confidence
+    persons, _ = peoplemod.persons_for_faces(
+        [{"box": [1, 1, 9, 9], "embedding": None}], {}, {}, threshold=0.9,
+        path="photos/anita rao.png")
+    assert persons[0]["name"] == "Anita Rao"
+    assert persons[0]["confidence"] == 0.45
+
+
+def test_filename_hint_rejects_junk_and_uses_folder_only_if_enrolled():
+    det = [{"box": [2, 2, 8, 8], "embedding": None}]
+    # digits / IMG- pattern never becomes a person
+    persons, unnamed = peoplemod.persons_for_faces(
+        det, {}, {}, threshold=0.9, path="D:/DCIM/IMG-20250714-WA0012.jpg")
+    assert persons[0]["source"] == "face_unmatched"
+    assert unnamed == 1
+    # folder name trusted only when it matches an enrolled name
+    persons, _ = peoplemod.persons_for_faces(
+        det, {}, {"Sanjay Agarwal": [0.0] * 128}, threshold=0.99,
+        path="C:/Albums/Sanjay Agarwal/IMG_0001.jpg")
+    assert persons[0]["name"] == "Sanjay Agarwal"
+    assert persons[0]["source"] == "face_folder"
+    # non-enrolled folder (event name) is never a person
+    persons, _ = peoplemod.persons_for_faces(
+        det, {}, {}, threshold=0.9, path="C:/Albums/New folder/IMG_0001.jpg")
+    assert persons[0]["source"] == "face_unmatched"

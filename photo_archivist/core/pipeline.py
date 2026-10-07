@@ -201,7 +201,7 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
     face_lib_path = faces_cfg.get("library", "faces_library.json")
     face_lib = peoplemod.load_face_library(face_lib_path)
     lib_before = set(face_lib.keys())
-    thr = float(faces_cfg.get("match_threshold", 0.60))
+    thr = float(faces_cfg.get("match_threshold", 0.40))
     # One detection entry per face: vision boxes + per-face embeddings when given.
     detections: list[dict] = []
     for _i, _b in enumerate(vr.face_boxes or []):
@@ -219,13 +219,25 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
         for fb in face_boxes:
             _box = fb.get("box") if isinstance(fb, dict) else fb
             if _box:
-                detections.append({"box": _box, "embedding": None})
+                detections.append({"box": _box, "embedding": None,
+                                   "raw_face": fb.get("raw_face") if isinstance(fb, dict) else None})
+    # Vision-boxed faces: attach YuNet 5-point landmarks by overlap so the
+    # embedding uses alignCrop (aligned space == enrollment space; a bare
+    # box crop scores ~0.28 cosine vs ~0.87 aligned and never matches).
+    if detections and face_boxes:
+        for _d in detections:
+            if not _d.get("raw_face"):
+                for fb in face_boxes:
+                    if isinstance(fb, dict) and peoplemod._same_box(_d.get("box"), fb.get("box")):
+                        _d["raw_face"] = fb.get("raw_face")
+                        break
     # Fill missing per-face embeddings locally (faces never leave the machine).
     if det.type == "image":
         for _d in detections:
             if not _d.get("embedding"):
                 try:
-                    _e = facesmod.embed_face(path, {"box": _d.get("box")}, cfg)
+                    _e = facesmod.embed_face(path, {"box": _d.get("box"),
+                                                    "raw_face": _d.get("raw_face")}, cfg)
                     if _e is None:
                         _e = facesmod.crop_vector(path, _d.get("box"))
                     _d["embedding"] = _e
@@ -233,7 +245,7 @@ def process_file(path: str, cfg: dict, vision_backend=None) -> dict:
                     pass
     persons, _unnamed_n = peoplemod.persons_for_faces(
         detections, raw, face_lib, threshold=thr,
-        people_hints=list(vr.people_hints or []))
+        people_hints=list(vr.people_hints or []), path=path)
     # Ground-truth region names with no detection box still count - never drop
     # a human label even when the detector missed that face.
     try:

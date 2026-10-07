@@ -189,15 +189,60 @@ def _same_box(a: list | None, b: list | None) -> bool:
     return _box_overlap(sa, sb) > 0.15
 
 
+_NON_NAME_WORDS = {
+    "new", "folder", "image", "images", "img", "photo", "photos", "picture",
+    "pictures", "copy", "screenshot", "screen", "scan", "document", "untitled",
+    "unnamed", "final", "edit", "version", "download", "downloads", "dsc", "dcim",
+}
+
+
+def _looks_like_person_name(s: str) -> bool:
+    """2-4 alphabetic words, no digits, no 'New Folder'-style words."""
+    words = [w for w in str(s).split() if w]
+    if not (2 <= len(words) <= 4):
+        return False
+    if not all(w.isalpha() and len(w) > 1 for w in words):
+        return False
+    return not any(w.lower() in _NON_NAME_WORDS for w in words)
+
+
+def _path_name_hints(path: str | None, library: dict) -> tuple[str | None, str | None]:
+    """(filename_name, folder_name) candidates — folder only if enrolled.
+
+    'faces/sanjay agarwal.png' -> ('Sanjay Agarwal', None).
+    Folder names are only trusted when they exactly match an enrolled name
+    (folders are usually events: 'New folder' must never become a person)."""
+    from . import faces as facemod
+    if not path:
+        return None, None
+    norm = str(path).replace("\\\\", "/").replace("\\", "/")
+    parts = [p for p in norm.split("/") if p]
+    if not parts:
+        return None, None
+    file_name = None
+    cand = facemod.clean_name(parts[-1])
+    if _looks_like_person_name(cand):
+        file_name = cand
+    folder_name = None
+    if len(parts) >= 2:
+        seg = facemod.clean_name(parts[-2])
+        lib_ci = {str(k).lower(): str(k) for k in (library or {})}
+        if seg.lower() in lib_ci:
+            folder_name = lib_ci[seg.lower()]
+    return file_name, folder_name
+
+
 def persons_for_faces(detections: list[dict], raw: dict, library: dict,
                       threshold: float = 0.60,
                       people_hints: list | None = None,
-                      hint_conf: float = 0.5) -> tuple[list[dict], int]:
+                      hint_conf: float = 0.5,
+                      path: str | None = None) -> tuple[list[dict], int]:
     """Tag EVERY detected face. Returns (persons, unnamed_count).
 
     detections: [{box, embedding?}] — one entry per face in the image.
     Priority per face: region name (0.99) > local match (>=threshold) >
-    vision hint (<=0.5) > "Unknown Person <n>" (0.2, asks for a name in _Review).
+    filename/folder name (0.45-0.60) > vision hint (<=0.5) >
+    "Unknown Person <n>" (0.2, asks for a name in _Review).
     Faces never leave the machine: embeddings compared locally only.
     """
     from . import faces as facemod  # local import: keeps people.py dependency-light
@@ -208,6 +253,9 @@ def persons_for_faces(detections: list[dict], raw: dict, library: dict,
     unnamed = 0
     used_regions: set[int] = set()
     used_hints: set[int] = set()
+    file_hint, folder_hint = _path_name_hints(path, library)
+    lib_ci = {str(k).lower(): str(k) for k in (library or {})}
+    path_hint_used = False
 
     for i, det in enumerate(detections or []):
         box = det.get("box")
@@ -243,6 +291,23 @@ def persons_for_faces(detections: list[dict], raw: dict, library: dict,
         m = _match(det.get("embedding"), library, threshold=threshold)
         if m:
             entry = dict(m)
+            if box:
+                entry["box"] = box
+            persons.append(entry)
+            continue
+        # 2b) filename/folder name — "sanjay agarwal.png" => Sanjay Agarwal.
+        # Applied to the first unmatched face only (one file, one subject).
+        if not path_hint_used and (file_hint or folder_hint):
+            path_hint_used = True
+            if file_hint and file_hint.lower() in lib_ci:
+                entry = {"name": lib_ci[file_hint.lower()],
+                         "source": "face_filename", "confidence": 0.60}
+            elif file_hint:
+                entry = {"name": file_hint,
+                         "source": "face_filename", "confidence": 0.45}
+            else:
+                entry = {"name": folder_hint,
+                         "source": "face_folder", "confidence": 0.55}
             if box:
                 entry["box"] = box
             persons.append(entry)

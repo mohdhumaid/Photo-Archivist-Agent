@@ -68,8 +68,30 @@ def enabled(cfg: dict | None) -> bool:
     return bool(c.get("enabled")) and bool(c.get("base_url")) and bool(c.get("model"))
 
 
+def _load_dotenv(path: str = "..") -> None:
+    """Read .env (key=val) into os.environ. .env sits next to config.yaml."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k = k.strip()
+                v = v.strip()
+                if len(v) >= 2 and ((v[0] == """ and v[-1] == """) or
+                                     (v[0] == "'" and v[-1] == "'")):
+                    v = v[1:-1]
+                os.environ.setdefault(k, v)
+    except OSError:
+        pass
+
+
 def _secret(c: dict) -> str:
-    return os.environ.get(str(c.get("api_key_env") or ""), "") or str(c.get("api_key") or "")
+    # 1) .env file next to config.yaml  2) real env var  3) config fallback
+    _load_dotenv()
+    env_var = str(c.get("api_key_env") or "").strip()
+    return os.environ.get(env_var, "") or str(c.get("api_key") or "")
 
 
 def _strip_think(text: str) -> str:

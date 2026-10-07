@@ -159,6 +159,17 @@ def _box_overlap(a: list, b: list) -> float:
         return 0.0
 
 
+def _to01(box: list) -> list:
+    """Map [x,y,w,h] into 0..1 space so pixel boxes compare with regions.
+
+    Haar/YuNet boxes are pixels (e.g. [75,15,42,55]); MWG regions are
+    normalized (e.g. [0.31,0.22,0.12,0.18]). Dividing by the box extent
+    keeps small-face vs large-face geometry comparable without knowing
+    the image size."""
+    m = max([abs(v) for v in box[:4]] + [1e-9])
+    return [v / m for v in box[:4]]
+
+
 def _same_box(a: list | None, b: list | None) -> bool:
     """Match a detection box to a region box (mixed px/normalised tolerated)."""
     if not a or not b:
@@ -171,12 +182,11 @@ def _same_box(a: list | None, b: list | None) -> bool:
     # both small (<2) => normalised coords, compare directly
     if max(an + bn) <= 2.0:
         return all(abs(x - y) < 0.08 for x, y in zip(an, bn))
-    # mixed scales: scale the normalised one by a nominal 1000px frame
-    if max(an) > 2.0 and max(bn) <= 2.0:
-        bn = [v * 1000 for v in bn]
-    elif max(bn) > 2.0 and max(an) <= 2.0:
-        an = [v * 1000 for v in an]
-    return _box_overlap(an, bn) > 0.15
+    # mixed/large scales: compare in scale-free 0..1 space + IoU fallback
+    sa, sb = _to01(an), _to01(bn)
+    if all(abs(x - y) < 0.08 for x, y in zip(sa, sb)):
+        return True
+    return _box_overlap(sa, sb) > 0.15
 
 
 def persons_for_faces(detections: list[dict], raw: dict, library: dict,

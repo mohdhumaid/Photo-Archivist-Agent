@@ -135,16 +135,28 @@ def build_messages(cfg: dict | None, path: str, prime: dict) -> tuple:
         if too_big:
             content.append({"type": "image_url", "image_url": {"url": f"file://{path}"}})
         else:
-            durl = _data_url(path, str(prime.get("mime") or ""))
+            try:  # corrupt/unreadable image -> text-first, never crash
+                from PIL import Image as _PILImage
+                with _PILImage.open(path) as _im:
+                    _im.verify()
+                durl = _data_url(path, str(prime.get("mime") or ""))
+            except Exception:
+                durl = None
             if durl:
-                content.append({"type": "image_url", "image_url": {"url": durl}})
+                content.append(_image_part(durl))
     # documents: text-first, no image bytes
     messages = [{"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": content}]
     return messages, tmp_frame
 
 
+LAST_ERROR: str = ""
+
+
 def _post(cfg: dict | None, messages: list) -> dict | None:
+    """POST the chat payload. Failures stash a reason in LAST_ERROR."""
+    global LAST_ERROR
+    LAST_ERROR = ""
     c = vllm_cfg(cfg)
     url = str(c.get("base_url", "")).rstrip("/")
     payload = {"model": c.get("model"),
@@ -155,14 +167,26 @@ def _post(cfg: dict | None, messages: list) -> dict | None:
     key = _secret(c)
     if key:
         headers["Authorization"] = f"Bearer {key}"
+    elif "apillmgov" in url or "gateway" in url:
+        LAST_ERROR = (f"no Bearer key sent (api_key_env="
+                      f"{c.get('api_key_env') or 'LLM_API_KEY'} unset and no api_key"
+                      f" in config); gateway likely returned 401")
     try:
         import requests
         r = requests.post(url, json=payload, headers=headers,
                           timeout=int(c.get("timeout", 120)))
         if r.status_code >= 400:
+            body = (r.text or "")[:300]
+            LAST_ERROR = f"HTTP {r.status_code}: {body}"
             return None
-        return r.json()
-    except Exception:
+        try:
+            return r.json()
+        except Exception as e:
+            LAST_ERROR = f"non-JSON 200 response: {e}"
+            return None
+    except Exception as e:
+        if not LAST_ERROR:
+            LAST_ERROR = f"{type(e).__name__}: {e}"
         return None
 
 
@@ -206,6 +230,21 @@ def describe(cfg: dict | None, path: str, prime: dict) -> dict | None:
     messages, tmp_frame = build_messages(cfg, path, prime)
     try:
         resp = _post(cfg, messages)
+        if resp is None and "image_url" in (LAST_ERROR or ""):
+            flat = []  # some gateways want {"type":"image_url","url":...}
+            for m in messages:
+                if not isinstance(m.get("content"), list):
+                    flat.append(m)
+                    continue
+                parts = []
+                for pt in m["content"]:
+                    if pt.get("type") == "image_url":
+                        url = (pt.get("image_url") or {}).get("url", "")
+                        parts.append({"type": "image_url", "url": url})
+                    else:
+                        parts.append(pt)
+                flat.append({"role": m.get("role"), "content": parts})
+            resp = _post(cfg, flat)
         out = _extract_json(_message_text(resp) or "")
         if not isinstance(out, dict) or not out.get("caption"):
             return None
@@ -229,3 +268,10 @@ def _data_url(path: str, mime: str = "") -> str | None:
         return f"data:{mt};base64,{b64}"
     except OSError:
         return None
+
+
+def _image_part(durl: str) -> dict:
+    """OpenAI-style image part. Qwen3-VL gateways that reject the nested
+    ``{"image_url": {"url": ...}}`` envelope accept the flat ``{"url": ...}``
+    form - describe() retries with this shape on an explicit envelope error."""
+    return {"type": "image_url", "image_url": {"url": durl}}

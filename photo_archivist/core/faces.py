@@ -90,6 +90,20 @@ def available() -> tuple[bool, str]:
     return False, f"opencv {cv2.__version__} installed but cascade/models missing"
 
 
+def _quiet_opencv() -> None:
+    """Mute the noisy DNN graph-engine warning (OpenCV 5.x targets notice)."""
+    try:
+        import cv2 as _cv2
+        if not getattr(_quiet_opencv, "done", False):
+            try:
+                _cv2.utils.logging.setLogLevel(_cv2.utils.logging.LOG_LEVEL_ERROR)
+            except Exception:
+                pass
+            _quiet_opencv.done = True
+    except Exception:
+        pass
+
+
 def detect_faces(path: str, cfg: dict | None = None) -> list[dict]:
     """Detect faces in an image using YuNet (or Haar cascade fallback)."""
     try:
@@ -261,8 +275,15 @@ def enroll_folder(folder_path: str, lib_path: str = "faces_library.json", cfg: d
         name = clean_name(fn)
         vec = embed_largest_face(p, cfg)
         if vec:
-            lib[name] = vec
-            results[name] = f"OK ({len(vec)} dims from {fn})"
+            dims = {len(v) for v in lib.values() if isinstance(v, list)}
+            if dims and len(vec) not in dims:
+                results[name] = (f"SKIPPED: {len(vec)}-dim embedding from {fn} "
+                                 f"does not match library dims {sorted(dims)} - "
+                                 f"re-enroll the whole folder after switching "
+                                 f"models (SFace=128 vs template=4096)")
+            else:
+                lib[name] = vec
+                results[name] = f"OK ({len(vec)} dims from {fn})"
         else:
             results[name] = f"FAILED: no face detected in {fn}"
 

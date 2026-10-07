@@ -1,18 +1,7 @@
-"""Standalone LiteLLM / OpenAI-compatible gateway checker (Windows-friendly).
-
-Usage (PowerShell):
-  $env:LLM_API_KEY = "sk-..."   # paste the Bearer token your gateway gave you
-  python tools/check_litellm.py --base-url https://dev-broccoli-apillmgov.auuat.bank.in/apillmgov/v1/chat/completions --model \"Qwen3 Vision 235b\" [--image path/to/photo.jpg] [--timeout 60]
-
-Exit 0 + parsed caption  => gateway reachable, key accepted, model id valid.
-Exit 2 + HTTP 401        => key missing/invalid (most common; see hint below).
-Exit 2 + HTTP 404        => model id wrong (ask gateway team for the exact id).
-Exit 2 + timeout/DNS     => network or proxy issue, not a code bug.
-
-Never commit a real key: pass it only via $env:LLM_API_KEY (or --api-key once
-for a throwaway test; the value is never written anywhere).
-"""
+#!/usr/bin/env python3
+"""LiteLLM / OpenAI-compatible gateway probe."""
 from __future__ import annotations
+
 import argparse
 import base64
 import json
@@ -20,66 +9,117 @@ import mimetypes
 import os
 import sys
 
+import requests
+
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Probe a LiteLLM / OpenAI-compatible chat endpoint.")
-    ap.add_argument("--base-url", required=True, help="Full .../v1/chat/completions URL")
-    ap.add_argument("--model", required=True, help="Exact model id the gateway expects")
-    ap.add_argument("--image", default="", help="Optional photo to attach as base64 image_url")
-    ap.add_argument("--api-key", default="", help="Bearer token (prefer $env:LLM_API_KEY)")
-    ap.add_argument("--timeout", type=int, default=60)
-    return ap
+    parser = argparse.ArgumentParser(description="Probe a LiteLLM / OpenAI-compatible chat endpoint")
+    parser.add_argument("--base-url", required=True, help="Full /v1/chat/completions URL")
+    parser.add_argument("--model", required=True, help="Model ID (example: Qwen3 Vision 235b)")
+    parser.add_argument("--image", default="", help="Optional image path")
+    parser.add_argument("--api-key", default="", help="Bearer token")
+    parser.add_argument("--timeout", type=int, default=90, help="Request timeout in seconds")
+    return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    key = args.api_key or os.environ.get("LLM_API_KEY", "")
-    user_content: list = [{"type": "text",
-                           "text": "Reply with exactly this JSON and nothing else: {\"caption\": \"ok\"}"}]
+
+    api_key = args.api_key or os.environ.get("LLM_API_KEY", "")
+
+    if not api_key:
+        print("ERROR: API key missing")
+        print("Use --api-key or set LLM_API_KEY environment variable")
+        return 2
+
+    content = [
+        {
+            "type": "text",
+            "text": "Analyze this image and return valid JSON only. If no image is supplied return {\"status\": \"ok\"}"
+        }
+    ]
+
     if args.image:
-        mt = mimetypes.guess_type(args.image)[0] or "image/jpeg"
+        if not os.path.exists(args.image):
+            print(f"ERROR: Image not found: {args.image}")
+            return 2
+
+        mime_type = mimetypes.guess_type(args.image)[0] or "image/jpeg"
+
         with open(args.image, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        user_content.append({"type": "image_url",
-                             "image_url": {"url": f"data:{mt};base64,{b64}"}})
-    payload = {"model": args.model, "temperature": 0.2, "max_tokens": 64,
-               "messages": [{"role": "user", "content": user_content}]}
-    headers = {"Content-Type": "application/json"}
-    masked = ""
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-        masked = key[:4] + "..." + key[-4:] if len(key) > 8 else "****"
-    else:
-        print("key: MISSING ($env:LLM_API_KEY unset and --api-key empty)", flush=True)
-    print(f"POST {args.base_url}", flush=True)
-    print(f"model={args.model} key={masked or 'none'} image={'yes' if args.image else 'no'}", flush=True)
+            image_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{image_b64}"
+                }
+            }
+        )
+
+    payload = {
+        "model": args.model,
+        "temperature": 0.2,
+        "max_tokens": 512,
+        "messages": [
+            {
+                "role": "user",
+                "content": content
+            }
+        ]
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    print("=" * 80)
+    print("LiteLLM Gateway Test")
+    print("=" * 80)
+    print("URL    :", args.base_url)
+    print("MODEL  :", args.model)
+    print("IMAGE  :", "YES" if args.image else "NO")
+    print("=" * 80)
+
     try:
-        import requests
-        r = requests.post(args.base_url, json=payload, headers=headers, timeout=args.timeout)
-    except Exception as e:
-        print(f"RESULT: TRANSPORT-ERROR {type(e).__name__}: {e}")
-        print("HINT: DNS/proxy/VPN. On Windows try: $env:HTTPS_PROXY=$env:https_proxy; or ask for the gateway's proxy.")
+        response = requests.post(
+            args.base_url,
+            json=payload,
+            headers=headers,
+            timeout=args.timeout
+        )
+
+    except requests.exceptions.RequestException as e:
+        print("\nTRANSPORT ERROR")
+        print(str(e))
         return 2
-    print(f"RESULT: HTTP {r.status_code}", flush=True)
-    body = (r.text or "")[:800]
-    print(f"body: {body}", flush=True)
-    if r.status_code == 401:
-        print("HINT: gateway got NO/WRONG key. Run: $env:LLM_API_KEY=\"sk-...\" then retry. Do not put the key in config.yaml.")
-        return 2
-    if r.status_code == 404:
-        print("HINT: URL or model id wrong. Confirm the exact model string with the gateway team.")
-        return 2
-    if r.status_code >= 400:
-        return 2
+
+    print("\nHTTP STATUS:", response.status_code)
+
     try:
-        data = r.json()
-        text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
-        print(f"parsed content: {json.dumps(text)[:300]}")
-        print("LITELLM OK - key accepted, model id valid.")
+        response_json = response.json()
+        print("\nRESPONSE JSON:")
+        print(json.dumps(response_json, indent=2))
+    except Exception:
+        print("\nRAW RESPONSE:")
+        print(response.text)
+
+    if response.status_code == 200:
+        print("\n✅ LiteLLM Gateway Working")
         return 0
-    except Exception as e:
-        print(f"RESULT: non-JSON 200: {e}")
+
+    if response.status_code == 401:
+        print("\n❌ Invalid API Key")
         return 2
+
+    if response.status_code == 404:
+        print("\n❌ Model ID or URL Incorrect")
+        return 2
+
+    print("\n❌ Request Failed")
+    return 2
 
 
 if __name__ == "__main__":

@@ -221,7 +221,7 @@ def check():
                    f"(key_env={vc.get('api_key_env') or 'LLM_API_KEY'})")
         probe = vllmmod._post(cfg, [{"role": "user",
                                      "content": [{"type": "text",
-                                                  "text": "Reply with: {"caption": "ok"}"}]}])
+                                                  "text": "Reply with: {\"caption\": \"ok\"}"}]}])
         if probe:
             typer.echo(f"{'vision_ping':10s} OK   endpoint reachable")
         else:
@@ -236,8 +236,6 @@ def check():
             else:
                 typer.echo(f"{'hint':10s} configure vision_llm.model/base_url/api_key_env in config.yaml, then re-run.")
         required_ok = required_ok and bool(probe)
-    else:
-        typer.echo(f"{'vision_llm':10s} disabled (vision_llm.enabled: false)")
     else:
         vc = (cfg.get("vision_llm") or {})
         typer.echo(f"{'vision_llm':10s} disabled "

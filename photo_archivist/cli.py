@@ -217,27 +217,35 @@ def check():
     from .core import vllm as vllmmod
     if vllmmod.enabled(cfg):
         vc = vllmmod.vllm_cfg(cfg)
-        typer.echo(f"{'vision_llm':10s} {vc.get('model')} @ {vc.get('base_url')}")
+        typer.echo(f"{'vision_llm':10s} {vc.get('model')} @ {vc.get('base_url')} "
+                   f"(key_env={vc.get('api_key_env') or 'LLM_API_KEY'})")
         probe = vllmmod._post(cfg, [{"role": "user",
                                      "content": [{"type": "text",
-                                                  "text": "Reply with: {\"caption\": \"ok\"}"}]}])
+                                                  "text": "Reply with: {"caption": "ok"}"}]}])
         if probe:
             typer.echo(f"{'vision_ping':10s} OK   endpoint reachable")
         else:
             err = vllmmod.LAST_ERROR or 'no response'
             typer.echo(f"{'vision_ping':10s} FAILED — {err}")
             if 'HTTP 401' in err:
-                typer.echo(f"{'hint':10s} gateway got NO key. PowerShell: $env:LLM_API_KEY='sk-...'")
-                typer.echo(f"{'':10s} (bash: export LLM_API_KEY='sk-...') then re-run check.")
-                typer.echo(f"{'':10s} Standalone probe: python tools/check_litellm.py")
-                _bu = vc.get('base_url'); _mo = vc.get('model')
-                typer.echo(f"{'':10s}   --base-url {_bu} --model {_mo!r}")
+                typer.echo(f"{'hint':10s} gateway got NO key. Set it in your shell (not config.yaml):")
+                typer.echo(f"{'':10s}   PowerShell: $env:LLM_API_KEY='sk-...'")
+                typer.echo(f"{'':10s}   standalone: python tools/check_litellm.py --base-url {vc.get('base_url')} --model {vc.get('model')}")
+            elif '404' in err:
+                typer.echo(f"{'hint':10s} 404 = model id or base_url wrong; ask gateway team for exact id.")
             else:
-                typer.echo(f"{'hint':10s} model='{vc.get('model')}' must match the gateway exactly.")
-                typer.echo(f"{'':10s} apillmgov gateways need the Bearer key above first.")
+                typer.echo(f"{'hint':10s} configure vision_llm.model/base_url/api_key_env in config.yaml, then re-run.")
         required_ok = required_ok and bool(probe)
     else:
         typer.echo(f"{'vision_llm':10s} disabled (vision_llm.enabled: false)")
+    else:
+        vc = (cfg.get("vision_llm") or {})
+        typer.echo(f"{'vision_llm':10s} disabled "
+                   f"(enabled={vc.get('enabled')}, "
+                   f"model={vc.get('model') or 'NOT SET'}, "
+                   f"base_url={vc.get('base_url') or 'NOT SET'}, "
+                   f"api_key_env={vc.get('api_key_env') or 'LLM_API_KEY'});")
+        typer.echo(f"{'':10s} set enabled: true plus the 3 values above to reach the gateway.")
     # faces_library.json: location + contents summary (dormant until embeddings exist)
     lib_path = (cfg.get("faces") or {}).get("library", "faces_library.json")
     if os.path.exists(lib_path):

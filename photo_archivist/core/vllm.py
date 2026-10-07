@@ -167,10 +167,30 @@ def _post(cfg: dict | None, messages: list) -> dict | None:
     key = _secret(c)
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    elif "apillmgov" in url or "gateway" in url:
-        LAST_ERROR = (f"no Bearer key sent (api_key_env="
-                      f"{c.get('api_key_env') or 'LLM_API_KEY'} unset and no api_key"
-                      f" in config); gateway likely returned 401")
+    # 401s are the gateway's answer to a missing/empty Bearer key; the
+    # caller (cli.check / check_litellm.py) owns the remediation.
+    elif key is None or key == "":
+        _hint = c.get('api_key_env') or 'LLM_API_KEY'
+        LAST_ERROR = (f"no Bearer key sent (api_key_env={_hint} unset or empty); "
+                      f"set it in your shell, e.g. PowerShell: $env:LLM_API_KEY='sk-...'")
+    try:
+        import requests
+        r = requests.post(url, json=payload, headers=headers,
+                          timeout=int(c.get("timeout", 120)))
+        if r.status_code >= 400:
+            body = (r.text or "")[:300]
+            LAST_ERROR = f"HTTP {r.status_code}: {body}"
+            return None
+        try:
+            return r.json()
+        except Exception as e:
+            LAST_ERROR = f"non-JSON 200 response: {e}"
+            return None
+    except Exception as e:
+        if not LAST_ERROR:
+            LAST_ERROR = f"{type(e).__name__}: {e}"
+        return None
+
     try:
         import requests
         r = requests.post(url, json=payload, headers=headers,

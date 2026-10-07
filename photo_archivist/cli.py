@@ -224,11 +224,17 @@ def check():
         if probe:
             typer.echo(f"{'vision_ping':10s} OK   endpoint reachable")
         else:
-            typer.echo(f"{'vision_ping':10s} FAILED — {vllmmod.LAST_ERROR or 'no response'}")
-            typer.echo(f"{'hint':10s} model='{vc.get('model')}' must match the gateway exactly;")
-            typer.echo(f"{'':10s} your log shows 'Qwen3 Vision 235b' - set vision_llm.model to that")
-            typer.echo(f"{'':10s} exact id if the gateway rejects 'Qwen/Qwen3-VL-8B-Thinking-FP8'.")
-            typer.echo(f"{'':10s} apillmgov gateways need 'export LLM_API_KEY=<bearer>' first.")
+            err = vllmmod.LAST_ERROR or 'no response'
+            typer.echo(f"{'vision_ping':10s} FAILED — {err}")
+            if 'HTTP 401' in err:
+                typer.echo(f"{'hint':10s} gateway got NO key. PowerShell: $env:LLM_API_KEY='sk-...'")
+                typer.echo(f"{'':10s} (bash: export LLM_API_KEY='sk-...') then re-run check.")
+                typer.echo(f"{'':10s} Standalone probe: python tools/check_litellm.py")
+                _bu = vc.get('base_url'); _mo = vc.get('model')
+                typer.echo(f"{'':10s}   --base-url {_bu} --model {_mo!r}")
+            else:
+                typer.echo(f"{'hint':10s} model='{vc.get('model')}' must match the gateway exactly.")
+                typer.echo(f"{'':10s} apillmgov gateways need the Bearer key above first.")
         required_ok = required_ok and bool(probe)
     else:
         typer.echo(f"{'vision_llm':10s} disabled (vision_llm.enabled: false)")

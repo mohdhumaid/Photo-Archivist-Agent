@@ -26,25 +26,25 @@ faces:
 embeddings:
   backend: hash    # local hash ONLY — org policy forbids model downloads
 vision:
-  backend: mock   # mock | llm  ("local" needs model downloads: blocked by org policy)
+  backend: mock   # mock | vllm  (vllm = local vLLM or LiteLLM gateway; llm = legacy alias of vllm)
 
-# Purple Fabric Magic Platform — the ONLY AI backend (org policy: no model
-# downloads from Hugging Face or any other site; this repo has no local AI).
-# Flow mirrors the platform sample: GET accesstoken -> POST invokeasset/genai
-# (Input_Text) -> poll invokeasset/<trace_id> until COMPLETED.
-llm:
-  enabled: false            # true -> vision step calls the Purple Fabric asset
-  base_url: ""              # e.g. https://dev-api.auuat.bank.in
-  asset_id: ""              # PF agent asset id (ASSET_ID in the sample script)
-  api_key_env: PF_API_KEY   # export PF_API_KEY='...' — never store secrets here
-  username_env: PF_USERNAME
-  password_env: PF_PASSWORD
-  api_key: ""               # fallback if env vars are unset — do NOT commit real values
-  username: ""
-  password: ""
-  poll_interval: 5          # seconds between result polls
-  poll_timeout: 300         # give up polling after this many seconds
-  send_images: false        # true = embed image bytes inside Input_Text (10 MB cap)
+# Local / gateway vision LLM — OpenAI-compatible /chat/completions.
+# Pick ONE of the two blocks below.
+vision_llm:
+  enabled: false
+  # --- Option A: self-hosted vLLM (Qwen3-VL, OpenAI-style, usually no key) ---
+  base_url: "http://127.0.0.1:8000/v1/chat/completions"
+  model: "Qwen/Qwen3-VL-8B-Thinking-FP8"
+  # --- Option B: LiteLLM gateway (Bearer key). Uncomment + set env, e.g. ---
+  # base_url: "https://<gateway-host>/apillmgov/v1/chat/completions"
+  # model: "claude-sonnet-4-6"
+  api_key_env: LLM_API_KEY   # export LLM_API_KEY='sk-...' — never store secrets here
+  api_key: ""                # fallback if env var unset — do NOT commit real values
+  temperature: 0.2
+  max_tokens: 1024
+  timeout: 120
+  video_mode: keyframe   # keyframe (portable, default) | file_url (vLLM file:// style)
+  max_image_mb: 10       # images above this are referenced, not base64-embedded
 
 # People library: confirmed names + org role map (local only; never uploaded)
 people: {}

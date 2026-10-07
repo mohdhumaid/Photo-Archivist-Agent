@@ -66,13 +66,37 @@ def pdf_meta(path: str) -> dict:
             pass
         try:
             out["pages"] = len(r.pages)
-            # text layer present?
             sample = "".join([(r.pages[i].extract_text() or "") for i in range(min(3, len(r.pages)))])
             out["has_text_layer"] = bool(sample.strip())
         except Exception:
             pass
         try:
             out["attachments"] = list((r.attachments or {}).keys()) if hasattr(r, "attachments") else []
+        except Exception:
+            pass
+        # structure: outline/bookmarks, form fields, annotations
+        try:
+            out["outline"] = [str(x)[:120] for x in (r.outline or [])][:50]
+        except Exception:
+            pass
+        try:
+            fields = r.get_fields() or {}
+            out["form_fields"] = {str(k): str((v or {}).get("/V", ""))[:200]
+                                  for k, v in list(fields.items())[:50]}
+        except Exception:
+            pass
+        try:
+            annots = []
+            for pg in r.pages[:20]:
+                for a in (pg.get("/Annots") or []):
+                    try:
+                        o = a.get_object()
+                        annots.append(str(o.get("/Contents", ""))[:200])
+                    except Exception:
+                        continue
+            annots = [a for a in annots if a]
+            if annots:
+                out["annotations"] = annots[:50]
         except Exception:
             pass
     except Exception as e:
@@ -88,6 +112,67 @@ def pdf_meta(path: str) -> dict:
                 out["trailer_id"] = str(trailer.get("/ID", ""))
             except Exception:
                 pass
+            # DocumentID / InstanceID link every revision of the same doc
+            try:
+                with pdf.open_metadata() as meta2:
+                    for kk in ("xmpMM:DocumentID", "xmpMM:InstanceID",
+                               "xmpMM:OriginalDocumentID"):
+                        try:
+                            vv = meta2.get(kk)
+                            if vv:
+                                out[kk.split(":")[-1]] = str(vv)
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+            # signatures: signer name + signing time (critical on sanction letters)
+            try:
+                sigs = []
+                for pg in pdf.pages[:50]:
+                    for a in (pg.get("/Annots") or []):
+                        try:
+                            o = dict(a)
+                            if str(o.get("/FT")) == "/Sig" or "/V" in o:
+                                v = o.get("/V")
+                                sigs.append(str(v)[:300])
+                        except Exception:
+                            continue
+                if sigs:
+                    out["signatures"] = sigs[:10]
+                    out["signed"] = True
+            except Exception:
+                pass
+            # embedded images: scanner model/timestamp often survive in the JPEG
+            try:
+                import io as _io
+                nimgs = 0
+                for pg in pdf.pages[:10]:
+                    res = dict(pg.get("/Resources") or {})
+                    xobj = dict(res.get("/XObject") or {})
+                    for ref in list(xobj.values())[:10]:
+                        try:
+                            o = ref.read_bytes() if hasattr(ref, "read_bytes") else None
+                            if o and o[:2] == b"\xff\xd8":
+                                nimgs += 1
+                        except Exception:
+                            continue
+                if nimgs:
+                    out["embedded_images"] = nimgs
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # encryption / permissions via qpdf when present
+    try:
+        import shutil as _sh, subprocess as _sp
+        qpdf = _sh.which("qpdf")
+        if qpdf:
+            pr = _sp.run([qpdf, "--show-encryption", path],
+                         capture_output=True, text=True, timeout=30)
+            txt = (pr.stdout or "") + (pr.stderr or "")
+            if txt.strip():
+                out["encryption"] = txt[:1000]
+                out["encrypted"] = "not encrypted" not in txt.lower()
     except Exception:
         pass
     return out

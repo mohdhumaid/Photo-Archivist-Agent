@@ -25,9 +25,12 @@ def build_report(records: list[dict], decisions: list[dict],
         if any("pii" in str(f) or "pan_" in str(f) or "aadhaar" in str(f) for f in r.get("pii_flags", [])):
             questions.append(f"PII-FLAG {r['source_path']}: {r.get('pii_flags')}")
         n_faces = len(r.get("face_boxes") or [])
-        if n_faces >= unnamed_face_ask_n and not r.get("people"):
+        named = sum(1 for q in (r.get("people") or [])
+                    if q.get("name") and not str(q["name"]).startswith("Unknown Person"))
+        n_unnamed = max(n_faces - named, 0)
+        if n_faces and n_unnamed >= unnamed_face_ask_n:
             questions.append(
-                f"UNNAMED-FACE {r['source_path']}: {n_faces} faces detected, none named")
+                f"UNNAMED-FACE {r['source_path']}: {n_unnamed} of {n_faces} faces unnamed")
     tag_counts = Counter(t for r in records for t in (r.get("tags") or []))
     return {
         "files": len(records),

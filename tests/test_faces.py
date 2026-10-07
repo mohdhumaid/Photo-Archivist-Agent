@@ -47,13 +47,13 @@ def test_report_faces_coverage_and_unnamed_question():
     rep = reportmod.build_report(rec, [{"action": "new_folder", "score": 0.0}],
                                  unnamed_face_ask_n=3)
     assert rep["coverage"]["faces_pct"] == 100.0
-    assert any("UNNAMED-FACE" in q and "3 faces" in q for q in rep["questions"])
+    assert any("UNNAMED-FACE" in q and "3 of 3 faces unnamed" in q for q in rep["questions"])
     # below threshold -> no question
     rep2 = reportmod.build_report(rec, [{"action": "new_folder", "score": 0.0}],
                                   unnamed_face_ask_n=5)
     assert not any("UNNAMED-FACE" in q for q in rep2["questions"])
     # named people present -> no question
-    named = [dict(rec[0], people=[{"name": "X"}])]
+    named = [dict(rec[0], people=[{"name": "A"}, {"name": "B"}, {"name": "C"}])]
     rep3 = reportmod.build_report(named, [{"action": "new_folder", "score": 0.0}],
                                   unnamed_face_ask_n=3)
     assert not any("UNNAMED-FACE" in q for q in rep3["questions"])
@@ -98,3 +98,29 @@ def test_enroll_folder_and_match(tmp_path):
     assert m is not None
     assert m["name"] == "Sanjay Agarwal"
     assert m["confidence"] == 1.0
+
+
+def test_persons_for_faces_tags_every_face():
+    """3 detections -> 3 person entries (region + match + placeholder)."""
+    from photo_archivist.core import people as peoplemod
+    lib = {}
+    raw = {"XMP-mwg-rs:RegionInfo": [{"Name": "Anita Rao",
+        "Rectangle": {"X": 0.05, "Y": 0.05, "W": 0.20, "H": 0.20}}]}
+    dets = [{"box": [0.05, 0.05, 0.20, 0.20], "embedding": None},
+            {"box": [0.40, 0.05, 0.20, 0.20], "embedding": None},
+            {"box": [0.70, 0.05, 0.20, 0.20], "embedding": None}]
+    persons, unnamed = peoplemod.persons_for_faces(
+        dets, raw, lib, threshold=0.99,
+        people_hints=["Vikram Shah (banner)"])
+    assert len(persons) == 3
+    assert persons[0]["name"] == "Anita Rao" and persons[0]["confidence"] == 0.99
+    assert persons[1]["name"] == "Vikram Shah"
+    assert persons[0]["box"] and persons[1]["box"] and persons[2]["box"]
+    assert unnamed == 1 and persons[2]["name"].startswith("Unknown Person")
+
+
+def test_persons_for_faces_empty_detections_but_regions_kept():
+    """No detections -> pipeline keeps region names (tested separately)."""
+    from photo_archivist.core import people as peoplemod
+    persons, unnamed = peoplemod.persons_for_faces([], {}, {}, threshold=0.6)
+    assert persons == [] and unnamed == 0

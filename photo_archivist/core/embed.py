@@ -1,8 +1,8 @@
 """Step 8: Embeddings — local deterministic hash ONLY.
 
-Org policy: models may come ONLY from Purple Fabric. No sentence-transformers /
+No model downloads: no sentence-transformers /
 Hugging Face downloads, so vectors stay bag-of-words hashes (128-dim, hash-based
-similarity only). Semantic understanding lives in the PF agent output, not here.
+similarity only). Richer captions/tags come from the vision-LLM when enabled.
 """
 from __future__ import annotations
 import hashlib

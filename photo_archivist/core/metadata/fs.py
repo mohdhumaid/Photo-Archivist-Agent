@@ -67,18 +67,45 @@ FILENAME_PATTERNS = [
     ("whatsapp", re.compile(r"IMG-(?P<y>\d{4})(?P<m>\d{2})(?P<d>\d{2})-WA(?P<n>\d+)", re.I)),
     ("pixel", re.compile(r"PXL_(?P<y>\d{4})(?P<m>\d{2})(?P<d>\d{2})_(?P<rest>\d+)", re.I)),
     ("screenshot_mac", re.compile(r"Screenshot (?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2}) at (?P<h>\d{1,2})\.(?P<mi>\d{2})\.(?P<s>\d{2})", re.I)),
+    ("screenshot_win", re.compile(r"Screenshot[ _-]*\((?P<d>\d{1,2})-(?P<m>\d{1,2})-(?P<y>\d{4})\)", re.I)),
     ("nikon", re.compile(r"DSC_(?P<n>\d+)", re.I)),
     ("compact_date", re.compile(r"(?P<y>20\d{2})(?P<m>\d{2})(?P<d>\d{2})_(?P<h>\d{2})(?P<mi>\d{2})(?P<s>\d{2})")),
 ]
 
 
 def parse_filename(name: str) -> dict:
+    """Filename-as-metadata: WhatsApp / Pixel / Screenshots / DSC / compact dates.
+
+    Returns {pattern, embedded_date?, embedded_datetime?, ...}. Never guesses
+    beyond what the name literally carries.
+    """
     for kind, rx in FILENAME_PATTERNS:
         m = rx.search(name)
         if m:
-            d = {"pattern": kind, **m.groupdict()}
+            d = {"pattern": kind, **{k: v for k, v in m.groupdict().items() if v is not None}}
             if kind == "whatsapp" and all(k in d for k in ("y", "m", "d")):
                 d["embedded_date"] = f"{d['y']}-{d['m']}-{d['d']}"
+            elif kind == "screenshot_mac" and all(k in d for k in ("y", "m", "d")):
+                d["embedded_date"] = f"{d['y']}-{d['m']}-{d['d']}"
+                try:
+                    hh = int(d.get("h", 0) or 0)
+                    # mac screenshots use 12h clock without AM/PM in name; keep date only
+                    d["embedded_datetime"] = (
+                        f"{d['y']}-{d['m']}-{d['d']}T{hh:02d}:{d.get('mi', '00')}:{d.get('s', '00')}")
+                except Exception:
+                    pass
+            elif kind == "screenshot_win" and all(k in d for k in ("y", "m", "d")):
+                d["embedded_date"] = f"{d['y']}-{d['m']}-{d['d']}"
+            elif kind == "pixel" and all(k in d for k in ("y", "m", "d")):
+                d["embedded_date"] = f"{d['y']}-{d['m']}-{d['d']}"
+                rest = d.get("rest") or ""
+                if len(rest) >= 9:  # HHMMSSmmm
+                    d["embedded_datetime"] = (
+                        f"{d['y']}-{d['m']}-{d['d']}T{rest[0:2]}:{rest[2:4]}:{rest[4:6]}")
+            elif kind == "compact_date" and all(k in d for k in ("y", "m", "d", "h", "mi", "s")):
+                d["embedded_date"] = f"{d['y']}-{d['m']}-{d['d']}"
+                d["embedded_datetime"] = (
+                    f"{d['y']}-{d['m']}-{d['d']}T{d['h']}:{d['mi']}:{d['s']}")
             return d
     return {}
 

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS files(
  place_value TEXT, place_source TEXT, gps_lat REAL, gps_lon REAL,
  accuracy_m REAL, place_conf REAL,
  event_value TEXT, event_source TEXT, event_conf REAL,
- caption TEXT, tags TEXT, ocr_text TEXT, camera TEXT, photographer TEXT,
+ caption TEXT, photo_description TEXT, tags TEXT, ocr_text TEXT,
+ camera TEXT, photographer TEXT,
  rating INTEGER, document TEXT, duplicates TEXT, cluster_id TEXT,
  pii_flags TEXT, metadata_status TEXT, raw_metadata TEXT,
  img_vec BLOB, txt_vec BLOB);
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS folders(
  name TEXT PRIMARY KEY, centroid BLOB, tags TEXT, people TEXT,
  place TEXT, date_from TEXT, date_to TEXT, pattern TEXT);
 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
- caption, tags, ocr_text, source_path, place_value, event_value);
+ caption, photo_description, tags, ocr_text, source_path, place_value, event_value);
 """
 
 
@@ -54,9 +55,9 @@ def upsert_file(c: sqlite3.Connection, rec: dict) -> None:
         """INSERT OR REPLACE INTO files(file_id,sha256,phash,source_path,organised_path,
         type,mime,taken_at,taken_at_source,taken_at_conf,tz_source,place_value,place_source,
         gps_lat,gps_lon,accuracy_m,place_conf,event_value,event_source,event_conf,
-        caption,tags,ocr_text,camera,photographer,rating,document,duplicates,cluster_id,
+        caption,photo_description,tags,ocr_text,camera,photographer,rating,document,duplicates,cluster_id,
         pii_flags,metadata_status,raw_metadata,img_vec,txt_vec)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (rec.get("file_id"), rec.get("sha256"), rec.get("phash"), rec.get("source_path"),
          rec.get("organised_path"), rec.get("type"), rec.get("mime"), rec.get("taken_at"),
          rec.get("taken_at_source"), rec.get("taken_at_confidence"),
@@ -67,6 +68,7 @@ def upsert_file(c: sqlite3.Connection, rec: dict) -> None:
          (rec.get("place") or {}).get("accuracy_m"), (rec.get("place") or {}).get("confidence"),
          (rec.get("event") or {}).get("value"), (rec.get("event") or {}).get("source"),
          (rec.get("event") or {}).get("confidence"), rec.get("caption"),
+         rec.get("photo_description"),
          _j(rec.get("tags", [])), rec.get("ocr_text"), _j(rec.get("camera", {})),
          rec.get("photographer"), rec.get("rating"), _j(rec.get("document", {})),
          _j(rec.get("duplicates", [])), rec.get("cluster_id"),
@@ -86,9 +88,10 @@ def upsert_file(c: sqlite3.Connection, rec: dict) -> None:
         "(SELECT rowid FROM files WHERE file_id=?)",
         (rec.get("file_id"),))
     c.execute(
-        "INSERT INTO files_fts(rowid,caption,tags,ocr_text,source_path,place_value,event_value)"
-        " VALUES((SELECT rowid FROM files WHERE file_id=?),?,?,?,?,?,?)",
-        (rec.get("file_id"), rec.get("caption") or "", " ".join(rec.get("tags", []) or []),
+        "INSERT INTO files_fts(rowid,caption,photo_description,tags,ocr_text,source_path,place_value,event_value)"
+        " VALUES((SELECT rowid FROM files WHERE file_id=?),?,?,?,?,?,?,?)",
+        (rec.get("file_id"), rec.get("caption") or "", rec.get("photo_description") or "",
+         " ".join(rec.get("tags", []) or []),
          rec.get("ocr_text") or "", rec.get("source_path") or "",
          (rec.get("place") or {}).get("value") or "", (rec.get("event") or {}).get("value") or ""),
     )

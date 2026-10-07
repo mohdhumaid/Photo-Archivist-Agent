@@ -33,6 +33,48 @@ def iter_source(src: str, exclude: list) -> list[str]:
     return sorted(out)
 
 
+def _new_folder_name(r: dict, profiles: list[dict]) -> str:
+    """Derive a new folder name from metadata first (never vision caption alone).
+
+    Copies the pattern already on disk: if existing folders read
+    'YYYY-MM <Event>' keep that; if they read '<Event> Mon YYYY' match it.
+    Components: date from reconciled taken_at, place from place.value,
+    event from event.value. Below-threshold files never reach here —
+    decide() routes them to _Review first.
+    """
+    import re
+    taken = str(r.get("taken_at") or "")
+    m = re.search(r"(19|20)\d{2}[-:/](\d{1,2})", taken)
+    year, mon = (m.group(0)[:4], m.group(2).zfill(2)) if m else ("", "")
+    m2 = re.search(r"\b(19|20)\d{2}\b", taken)
+    year_only = m2.group(0) if m2 else ""
+    event = str((r.get("event") or {}).get("value") or "").strip()
+    place = str((r.get("place") or {}).get("value") or "").strip()
+    # keep names filesystem-safe and short
+    event = re.sub(r"[<>:\"/\\|?*]", "", event)[:60].strip()
+    place = re.sub(r"[<>:\"/\\|?*]", "", place.split(",")[0])[:40].strip()
+    core = " / ".join(p for p in (place, event) if p) or "Unsorted"
+    names = [p.get("name", "") for p in (profiles or [])]
+    pat_dash = any(re.match(r"^\d{4}-\d{2}\s", n) for n in names)
+    pat_long = any(re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", n)
+                   for n in names)
+    if year and mon and pat_dash:
+        return f"{year}-{mon} {core}".strip()
+    if year_only and pat_long:
+        import calendar
+        mon_name = ""
+        try:
+            mon_name = calendar.month_abbr[int(mon)].title() if mon else ""
+        except Exception:
+            mon_name = ""
+        return f"{core} {mon_name} {year_only}".strip()
+    if year and mon:
+        return f"{year}-{mon} {core}".strip()  # default pattern
+    if year_only:
+        return f"{year_only} {core}".strip()
+    return core
+
+
 @app.command()
 def scan(source: str, dry_run: bool = True, yes: bool = False,
          config: str = "config.yaml"):
@@ -78,9 +120,15 @@ def scan(source: str, dry_run: bool = True, yes: bool = False,
         if d["action"] == "file" and d.get("folder"):
             folder = d["folder"]            # promoted into a learned folder
         elif d["action"] == "review":
-            folder = "_Review"
+            folder = "_Review"              # 0.60-0.79: ask, never auto-file
         else:
-            folder = "Inbox"
+            # <0.60 (or no profiles yet): create a metadata-derived folder,
+            # unless the date is unreliable — then _Review with a question.
+            if (r.get("taken_at_confidence") or 0) < 0.35 or not r.get("taken_at"):
+                folder = "_Review"
+            else:
+                folder = _new_folder_name(r, profiles)
+            d["new_folder"] = folder
         dest_dir = os.path.join(organised, folder)
         dest = orgmod.organise_copy(r["source_path"], dest_dir,
                                     hardlink=bool(cfg.get("hardlink", False)))
@@ -150,7 +198,7 @@ def enroll(target: str, name: str = "", config: str = "config.yaml"):
 
 @app.command()
 def check():
-    """Environment readiness: binaries, OpenCV Haar, Purple Fabric config."""
+    """Environment readiness: binaries, OpenCV faces, vision-LLM endpoint."""
     import shutil
     pkg = {"ffprobe": "ffmpeg"}
     required_ok = True
@@ -166,12 +214,17 @@ def check():
         typer.echo("           install once: pip install opencv-python-headless")
         typer.echo("           (the Haar cascade XML ships INSIDE that wheel — no other download)")
     cfg = load_cfg()
-    from .core import llm as llmmod
-    if llmmod.enabled(cfg):
-        token = llmmod.get_access_token(cfg, force=True)
-        typer.echo(f"{'purplefabric':10s} {'OK   token acquired' if token else 'FAILED — check base_url / credentials'}")
+    from .core import vllm as vllmmod
+    if vllmmod.enabled(cfg):
+        vc = vllmmod.vllm_cfg(cfg)
+        typer.echo(f"{'vision_llm':10s} {vc.get('model')} @ {vc.get('base_url')}")
+        probe = vllmmod._post(cfg, [{"role": "user",
+                                     "content": [{"type": "text",
+                                                  "text": "Reply with: {\"caption\": \"ok\"}"}]}])
+        typer.echo(f"{'vision_ping':10s} {'OK   endpoint reachable' if probe else 'FAILED — check base_url / model / key'}")
+        required_ok = required_ok and bool(probe)
     else:
-        typer.echo(f"{'purplefabric':10s} disabled (llm.enabled: false)")
+        typer.echo(f"{'vision_llm':10s} disabled (vision_llm.enabled: false)")
     # faces_library.json: location + contents summary (dormant until embeddings exist)
     lib_path = (cfg.get("faces") or {}).get("library", "faces_library.json")
     if os.path.exists(lib_path):

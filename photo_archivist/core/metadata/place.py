@@ -21,16 +21,26 @@ def reconcile_place(raw: dict, path_segs: list, takeout: dict | None) -> dict:
         err, _ = _get2(raw, "GPSHPositioningError")
         return {"value": None, "source": "gps_fix", "gps": [float(lat), float(lon)],
                 "accuracy_m": err, "confidence": 0.9, "needs_geocode": True}
-    for field in ("Country-PrimaryLocationName", "City", "Sub-location", "Province-State"):
+    for field in ("Country-PrimaryLocationName", "City", "Sub-location",
+                   "Province-State", "Country-PrimaryLocationCode",
+                   "Country-PrimaryLocationName"):
         v, k = _get2(raw, field)
         if v:
             return {"value": str(v), "source": f"iptc_{field}", "gps": None,
                     "accuracy_m": None, "confidence": 0.8}
-    for field in ("City", "Country", "LocationShown"):
+    for field in ("City", "State", "Country", "LocationShown",
+                  "LocationCreated", "CountryCode", "CountryShown"):
         v, k = _get2(raw, field)
         if v:
             return {"value": str(v), "source": f"xmp_{field}", "gps": None,
                     "accuracy_m": None, "confidence": 0.75}
+    # Description/caption can carry 'City, State' copy when structured fields
+    # are empty — last structured resort before path (low confidence).
+    for field in ("Caption-Abstract", "Description", "Headline"):
+        v, k = _get2(raw, field)
+        if v and re.search(r"[A-Za-z]{3,},\s*[A-Za-z]{3,}", str(v)):
+            return {"value": str(v)[:120], "source": f"caption_{field}",
+                    "gps": None, "accuracy_m": None, "confidence": 0.35}
     if takeout and isinstance(takeout.get("geoData"), dict):
         g = takeout["geoData"]
         if g.get("latitude"):

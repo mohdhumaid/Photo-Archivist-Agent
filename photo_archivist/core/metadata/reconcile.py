@@ -13,19 +13,53 @@ def _get(raw: dict, *names: str):
     return None, None
 
 
+def _norm_exif_dt(v, subsec=None, off=None) -> str:
+    """'2025:07:14 11:32:08' (+ SubSec + Offset) -> ISO."""
+    s = str(v).strip().replace(":", "-", 2).replace(" ", "T", 1)
+    if subsec not in (None, ""):
+        try:
+            frac = re.sub(r"\D", "", str(subsec))[:3]
+            if frac and "." not in s:
+                s += f".{frac}"
+        except Exception:
+            pass
+    if off not in (None, ""):
+        m = re.match(r"^([+-])(\d{2}):?(\d{2})?$", str(off).strip())
+        if m and not re.search(r"[+-]\d{2}:?\d{2}$", s):
+            s += f"{m.group(1)}{m.group(2)}:{m.group(3) or '00'}"
+    return s
+
+
 def reconcile_date(raw: dict, filename_info: dict, takeout: dict | None,
                    docmeta: dict, fs: dict, tz_default: str = "Asia/Kolkata") -> dict:
     tz_assumed = f"assumed_{tz_default.lower().replace('/', '_')}"
     v, k = _get(raw, "DateTimeOriginal")
-    off, _ = _get(raw, "OffsetTimeOriginal", "OffsetTime")
+    sub, _ = _get(raw, "SubSecTimeOriginal", "SubSecTime")
+    off, _ = _get(raw, "OffsetTimeOriginal", "OffsetTime", "TimeZoneOffset")
     if v:
-        return {"taken_at": str(v), "source": "exif_datetimeoriginal",
+        iso = _norm_exif_dt(v, sub, off)
+        return {"taken_at": iso, "source": "exif_datetimeoriginal",
                 "confidence": 0.99 if off else 0.9,
                 "timezone_source": "exif_offsettime" if off else tz_assumed}
-    v, k = _get(raw, "GPSDateStamp", "GPSTimeStamp")
-    if v:
-        return {"taken_at": str(v), "source": "gps_timestamp", "confidence": 0.9,
-                "timezone_source": "utc"}
+    gdate, _ = _get(raw, "GPSDateStamp")
+    gtime, _ = _get(raw, "GPSTimeStamp")
+    if gdate or gtime:
+        try:
+            ds, ts = str(gdate or "").strip(), str(gtime or "").strip()
+            if ds and re.search(r"\d{4}", ds):
+                iso = ds.replace(":", "-", 2)
+                if ts:
+                    iso += f"T{ts}" if ":" in ts else f"T{ts}"
+                if not iso.endswith("Z"):
+                    iso += "Z"
+                return {"taken_at": iso, "source": "gps_timestamp",
+                        "confidence": 0.9, "timezone_source": "utc"}
+        except Exception:
+            pass
+        v2, _ = _get(raw, "GPSDateStamp", "GPSTimeStamp")
+        if v2:
+            return {"taken_at": str(v2), "source": "gps_timestamp",
+                    "confidence": 0.9, "timezone_source": "utc"}
     if takeout:
         ts = (takeout.get("photoTakenTime") or {})
         if isinstance(ts, dict) and ts.get("timestamp"):
@@ -37,29 +71,39 @@ def reconcile_date(raw: dict, filename_info: dict, takeout: dict | None,
                 pass
     v, k = _get(raw, "CreateDate")
     if v:
-        src = "quicktime_createdate" if "quicktime" in (k or "").lower() else "xmp_createdate"
-        return {"taken_at": str(v), "source": src, "confidence": 0.8,
-                "timezone_source": "utc_note" if "quick" in src else tz_assumed}
+        kl = (k or "").lower()
+        if "quicktime" in kl:
+            return {"taken_at": _norm_exif_dt(v), "source": "quicktime_createdate",
+                    "confidence": 0.8, "timezone_source": "utc_note"}
+        return {"taken_at": _norm_exif_dt(v), "source": "xmp_createdate",
+                "confidence": 0.8, "timezone_source": tz_assumed}
+    v, k = _get(raw, "MetadataDate")
+    if v:
+        return {"taken_at": _norm_exif_dt(v), "source": "xmp_metadatadate",
+                "confidence": 0.7, "timezone_source": tz_assumed}
+    if filename_info.get("embedded_datetime"):
+        return {"taken_at": filename_info["embedded_datetime"],
+                "source": "filename_datetime",
+                "confidence": 0.7, "timezone_source": tz_assumed}
     if filename_info.get("embedded_date"):
         return {"taken_at": filename_info["embedded_date"], "source": "filename_date",
                 "confidence": 0.6, "timezone_source": tz_assumed}
-    if filename_info.get("pattern") == "compact_date":
-        try:
-            d = filename_info
-            iso = f"{d['y']}-{d['m']}-{d['d']}T{d['h']}:{d['mi']}:{d['s']}"
-            return {"taken_at": iso, "source": "filename_datetime", "confidence": 0.7,
-                    "timezone_source": tz_assumed}
-        except Exception:
-            pass
     dm = docmeta or {}
     info = dm.get("info", {}) if isinstance(dm.get("info"), dict) else {}
     if info.get("CreationDate"):
         return {"taken_at": str(info["CreationDate"]), "source": "pdf_creationdate",
                 "confidence": 0.7, "timezone_source": "as_stored"}
+    if info.get("ModDate") or info.get("ModifyDate"):
+        return {"taken_at": str(info.get("ModDate") or info.get("ModifyDate")),
+                "source": "pdf_moddate", "confidence": 0.5,
+                "timezone_source": "as_stored"}
     core = dm.get("docProps/core.xml", {}) or {}
     if isinstance(core, dict) and core.get("created"):
         return {"taken_at": str(core["created"]), "source": "ooxml_created",
                 "confidence": 0.7, "timezone_source": "as_stored"}
+    if isinstance(core, dict) and core.get("modified"):
+        return {"taken_at": str(core["modified"]), "source": "ooxml_modified",
+                "confidence": 0.5, "timezone_source": "as_stored"}
     if fs.get("birthtime"):
         dt = datetime.fromtimestamp(fs["birthtime"]).isoformat()
         return {"taken_at": dt, "source": "fs_birthtime", "confidence": 0.3,

@@ -121,9 +121,11 @@ def test_scan_apply_then_promote(tmp_path):
     r1 = runner.invoke(app, ["scan", str(src), "--no-dry-run", "--yes",
                              "--config", str(cfgp)])
     assert r1.exit_code == 0, r1.output
-    assert "Inbox" in r1.output
+    # no learned profiles on first run: metadata-derived folder (spec §5),
+    # NOT a hardcoded Inbox (only _Review bypasses new-folder creation)
     profiles = idx.load_folders(str(tmp_path / "i.db"))
-    assert profiles and profiles[0]["name"] == "Inbox"
+    assert profiles and profiles[0]["name"] not in ("Inbox", "_Review")
+    assert "WROTE 2 copies" in r1.output
     # second scan: identical tags/vectors -> promote (action=file into Inbox)
     r2 = runner.invoke(app, ["scan", str(src), "--no-dry-run", "--yes",
                              "--config", str(cfgp)])

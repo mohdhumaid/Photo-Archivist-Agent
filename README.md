@@ -27,7 +27,7 @@ python -m photo_archivist.cli undo
 python -m photo_archivist.cli enroll faces                 # bulk folder enrollment
 python -m photo_archivist.cli enroll faces/sanjay\ agarwal.png --name "Sanjay Agarwal"
 
-# 6. Environment readiness (binaries / OpenCV Haar / Purple Fabric / faces library)
+# 6. Environment readiness (binaries / OpenCV faces / vision-LLM / faces library)
 python -m photo_archivist.cli check
 
 # Optional: face-box detection & enrollment (Haar cascade ships INSIDE the wheel — verify
@@ -35,22 +35,23 @@ python -m photo_archivist.cli check
 pip install -e .[faces]
 ```
 
-The default `mock` vision backend makes zero claims. The only sanctioned AI is the
-Purple Fabric agent (`vision.backend: llm` + `llm.enabled: true` — see the Purple Fabric
-section below). No local models are used or needed: org policy blocks model downloads,
-so this repo ships no `vision_local.py` and no `ai-local` pip extras.
+Default `vision.backend: mock` makes zero claims. The optional AI backend is any
+OpenAI-compatible `/chat/completions` endpoint — a self-hosted vLLM server
+(Qwen3-VL) or a LiteLLM gateway (Claude etc) — configured under `vision_llm`
+(see *Vision LLM* below). No model is ever downloaded: face detection uses the Haar
+cascade bundled inside `opencv-python-headless`, and text vectors are local hashes.
 
 ## Layout
 
 ```
-config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, LLM)
+config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, vision-LLM)
 people_library.yaml     # confirmed names + org role map (MD -> Anita Rao ...)
 faces_library.json      # face-embedding library (LOCAL ONLY, git-ignored; dormant)
 photo_archivist/cli.py  # scan / search / undo / enroll / check
 photo_archivist/core/
   detect.py fingerprint.py pipeline.py
   metadata/{exif,docs,video,fs,reconcile,place}.py
-  text.py vision.py llm.py faces.py people.py place.py embed.py
+  text.py vision.py vllm.py faces.py people.py place.py embed.py
   index.py decide.py organise.py search.py report.py pii.py
 tests/  sample_data/  data/
 ```
@@ -102,9 +103,9 @@ filled from sources that exist:
 1. **Embedded metadata** (works today): XMP `MWG:RegionInfo` / `PersonInImage` tags already
    inside the file — `photo_archivist/core/people.py::region_names()` reads them at
    confidence 0.99. Downloaded/social images rarely carry these.
-2. **Purple Fabric text hints** (works when enabled): the PF agent returns
-   `people_hints` — names literally present in OCR text or filenames — recorded with
-   `source: llm_text_extract` at confidence ≤ 0.9.
+2. **Vision-LLM text hints** (only when `vision_llm.enabled: true`): names literally
+   present in OCR text or filenames — recorded with `source: llm_text_extract` at
+   confidence ≤ 0.5. The LLM is instructed never to guess identities from faces.
 3. **Face detection — boxes only** (✅ live with OpenCV Haar): `faces.py::detect_faces()`
    counts faces and stores `face_boxes` in the record/sidecar. It answers *how many,
    where* — never *who*: no embeddings are produced. Install once with
@@ -120,7 +121,7 @@ filled from sources that exist:
 | What to do | Where / how |
 |---|---|
 | Populate people from files that already carry names | nothing to do — XMP/EXIF regions are read automatically |
-| Populate people from OCR-visible names | `vision.backend: llm` + `llm.enabled: true` (Purple Fabric section) |
+| Populate people from OCR-visible names | `vision.backend: vllm` + `vision_llm.enabled: true` (Vision LLM section) |
 | Install face detection | `pip install -e .[faces]` → `python -m photo_archivist.cli check` confirms the bundled cascade |
 | Face match strictness | `config.yaml` → `faces.match_threshold: 0.60`, `faces.local_only: true` |
 | Raise unnamed-face questions | `config.yaml` → `unnamed_face_ask_N: 3` (ask when ≥ N faces, none named) |
@@ -151,11 +152,11 @@ Sample contents — a flat JSON object, person name → 512-float face embedding
 }
 ```
 
-Each vector is compared by cosine similarity at `faces.match_threshold: 0.60`. Right now
-the file can exist but stays quiet: Haar detection yields boxes only, so there are no
-embeddings to compare against. It gets populated later from an embedding source your
-organization approves (e.g. vectors returned by the Purple Fabric asset) — never from a
-downloaded model under current policy.
+   inside the file — `photo_archivist/core/people.py::region_names()` reads them at
+   confidence 0.99. Downloaded/social images rarely carry these.
+   Unmatched boxes become `Unknown Person <n>` placeholders so one batched question
+   in `_Review/` names every new face once (see *First run / review loop*).
+
 
 ### Can I install OpenCV Haar on my company laptop? (run these first)
 
@@ -202,17 +203,17 @@ Organised/Inbox/AkhilVerma.jpeg :: Cline / Images (from path) · 2026-10-05T22:3
 
 ## Dummy vs live — what changed in code to go real
 
-Most stubs now have **real implementations with graceful fallbacks**: the pipeline always runs,
+Most components now have **real implementations with graceful fallbacks**: the pipeline always runs,
 and each component activates as soon as its dependency or config is present (gazetteer DB file,
-Purple Fabric credentials) — nothing is downloaded automatically.
+vision-LLM endpoint) — nothing is downloaded automatically.
 
 | # | Component | Status now | Code changes made |
 |---|---|---|---|
-| 1 | **Vision / captions** | ⚙️ **Ready** — two backends, both code-complete | `vision.py::get_backend(name, cfg)` selects `mock` / `llm` (and maps stale `local` → `mock`, since org policy removed all local models). `mock` makes zero claims; `llm` calls the Purple Fabric asset — see the *Purple Fabric* section. Activate: `vision.backend: llm` + `llm.*` credentials. |
-| 2 | **Text embeddings** | ✅ **Local hash by policy** — deterministic, no downloads | `embed.py` is hash-only (128-dim bag-of-words): sentence-transformers was **removed** because it downloads a Hugging Face model. Semantic understanding comes from the Purple Fabric agent's tags/captions instead. `pipeline.py` still passes `cfg.embeddings.backend` for forwards compatibility (only `hash` is supported). |
+| 1 | **Vision / captions** | ⚙️ **Ready** — mock + OpenAI-compatible gateway | `vision.py::get_backend(name, cfg)` selects `mock` / `vllm` (`llm` = legacy alias of `vllm`). `mock` makes zero claims; `vllm` calls `vision_llm.base_url` (self-hosted vLLM like Qwen3-VL, or a LiteLLM gateway like Claude) — see the *Vision LLM* section. Activate: `vision.backend: vllm` + `vision_llm.enabled: true`. |
+| 2 | **Text embeddings** | ✅ **Local hash** — deterministic, no downloads | `embed.py` is hash-only (128-dim bag-of-words). Richer captions/tags come from the vision-LLM when enabled. `pipeline.py` still passes `cfg.embeddings.backend` for forwards compatibility (only `hash` is supported). |
 | 3 | **Image embeddings** | ⛔ **Removed by org policy** — CLIP downloads a model | `vision_local.py` was deleted; `vectors.image` stays `null`. Visual similarity is therefore inert; similarity signals come from tags/OCR instead. |
 | 4 | **Reverse geocoding** | ✅ **Live** — real SQLite gazetteer lookup | **`place.py` rewritten**: `reverse_geocode()` queries `geonames(lat,lon)` within ±0.5° (confidence 0.9) when the DB exists, else the old stub. **New** `load_gazetteer(tsv, db)` builds the DB from a GeoNames dump. `pipeline.py` now passes `cfg.geocode.offline_db`. |
-| 5 | **Face detection / recognition** | ✅ **Detection live** (OpenCV Haar) · ⛔ recognition dormant | **New** `faces.py`: `detect_faces()` counts face boxes via the Haar cascade bundled in `opencv-python-headless` (zero runtime downloads) → stored as `face_boxes` in records/sidecars; report gains `faces_pct` + `UNNAMED-FACE` questions (`unnamed_face_ask_N`); **new** `check` CLI verifies install. Identity matching (`match_local` + `faces_library.json`) still needs an embedding source — blocked by policy until approved. |
+| 5 | **Face detection / recognition** | ✅ **Live, every face** (OpenCV Haar/YuNet + SFace/template) | `faces.py`: `detect_faces()` boxes every face → `embed_face()`/`crop_vector()` embeds each one → `people.py::persons_for_faces()` tags ALL of them (region 0.99 > local match > LLM text hint ≤0.5 > `Unknown Person` placeholder). `check` verifies the install; embeddings never leave the machine. |
 | 6 | **Folder learning** | ✅ **Live** — pure code, fully active today | **`index.py`**: `profile_from_records()`, `upsert_folder()`, `load_folders()` (uses the existing `folders` table). **`cli.py scan`**: loads learned profiles before `decide()`, files promoted files into the learned folder (not always `Inbox`), then persists updated profiles after apply — so `thresholds.promote: 0.80` now actually fires on re-scans. |
 | 7 | **Role placeholders** | 📝 **User data** | Not code — put real names in `config.yaml → roles` or `people_library.yaml` (see *People library* above). |
 | 8 | **OCR** | ✅ Already live (`tesseract`) | Nothing to change. |
@@ -221,10 +222,10 @@ Purple Fabric credentials) — nothing is downloaded automatically.
 ### Going live — commands
 
 ```bash
-# 1: Purple Fabric captions/tags/people-hints (only step needing AI):
-export PF_API_KEY='...' PF_USERNAME='...' PF_PASSWORD='...'
-# then in config.yaml: llm.base_url, llm.asset_id, llm.enabled: true,
-#                      vision.backend: llm
+# 1: vision-LLM captions/tags/people-hints (only step needing AI):
+export LLM_API_KEY='sk-...'
+# then in config.yaml: vision_llm.base_url, vision_llm.model, vision_llm.enabled: true,
+#                      vision.backend: vllm
 
 # 4: build the offline gazetteer (GeoNames dump; no online calls ever, no AI models)
 curl -O https://download.geonames.org/export/dump/cities500.zip && unzip cities500.zip
@@ -239,172 +240,65 @@ fallback. After changing any component, run `undo` (or delete `index.db` + `Orga
 re-scan — already-written sidecars and vectors are **not** retroactively upgraded.
 All stored vectors are 128-d hashes (`embeddings.backend: hash`), so no rebuild concerns.
 
-## Purple Fabric LLM agent (Claude Sonnet 4.5 / GPT-5.2) — optional
+## Vision LLM (local vLLM or LiteLLM gateway) — optional
 
-### Where it is used
+One protocol serves both endpoints — they differ only in config (`config.yaml → vision_llm`):
+
+```yaml
+vision:
+  backend: vllm   # mock | vllm  (llm = legacy alias of vllm)
+vision_llm:
+  enabled: true
+  # --- Option A: self-hosted vLLM (Qwen3-VL, OpenAI-style, usually no key) ---
+  base_url: "http://127.0.0.1:8000/v1/chat/completions"
+  model: "Qwen/Qwen3-VL-8B-Thinking-FP8"
+  # --- Option B: LiteLLM gateway (Bearer key). Uncomment + set env, e.g. ---
+  # base_url: "https://<gateway-host>/apillmgov/v1/chat/completions"
+  # model: "claude-sonnet-4-6"
+  api_key_env: LLM_API_KEY   # export LLM_API_KEY='sk-...' — never store secrets here
+  temperature: 0.2
+  max_tokens: 1024
+  timeout: 120
+  video_mode: keyframe   # keyframe (portable, default) | file_url (vLLM file:// style)
+```
 
 One integration point: the **vision step (Step 5) of `scan`**, when you set
-`vision.backend: llm` **and** `llm.enabled: true` in `config.yaml`. Per file, the agent
-returns caption/scene/event/objects/tags/people-hints/PII, which the pipeline merges with
-full provenance (`source: llm_text_extract`, confidence ≤ 0.9):
+`vision.backend: vllm` **and** `vision_llm.enabled: true`. Per file the model
+returns caption/scene/event/objects/tags/people-hints/PII/location-guess plus the
+photo-description fields (`visible_text`, `people_activity`, `mood`, `background`),
+which the pipeline merges with full provenance:
 
-| Pipeline field | Fed by the agent | Consumed as |
-|---|---|---|
-| `caption` | `caption` (+ `scene`, `event_type`) | sidecar + FTS index + search hits |
-| `tags` | `tags` | merged with keyword/path tags → FTS search |
-| `people` | `people_hints` | persons with `source: llm_text_extract` |
-| `pii_flags` | `pii_flags` | prefixed `llm:` and added to the record |
-
-`search` and `undo` stay fully local — they run on `index.db` (the agent's tags are already
-in it). The model (`claude-sonnet-4-5` or `gpt-5.2`) is selected **on the agent in Purple
-Fabric Agent Designer**, not in this repo.
-
-### Creating the agent in Purple Fabric (Agent Designer)
-
-1. **Agent Designer → create agent**, Interaction type = **Automation** (structured I/O,
-   headless — not Conversation).
-2. **Register input variables** (Parameters): `file_name`, `file_type`, `mime`,
-   `path_segments`, `ocr_text`, `metadata_json`, `image_base64`.
-3. **Perspective (= System Prompt)**: paste the block below verbatim
-   (kept in sync with `photo_archivist/core/llm.py::SYSTEM_PROMPT`).
-4. **Output**: single JSON object wrapped in **double curly braces** `{{ ... }}` (the PF
-   automation JSON convention).
-5. **Models → LLM**: pick `claude-sonnet-4-5` **or** `gpt-5.2`.
-6. **Publish** and note the agent's **asset id** → `config.yaml → llm.asset_id`. Export
-   credentials (*never* stored in config, never committed):
-   ```bash
-   export PF_API_KEY='...' PF_USERNAME='...' PF_PASSWORD='...'
-   ```
-   The env-var names are configurable (`api_key_env`, `username_env`, `password_env`).
-   As a fallback for one-off runs you may fill `api_key`/`username`/`password`
-   in `config.yaml` directly — **do not commit real values**.
-7. Set `llm.base_url` (e.g. `https://dev-api.auuat.bank.in`), `llm.enabled: true`,
-   and `vision.backend: llm`.
-
-### System prompt (Perspective) — copy/paste
-
-```text
-You are the Photo Archivist Document Intelligence Expert — an Automation
-Digital Expert on Purple Fabric. You run headless inside a photo/document archiving
-pipeline: no conversation, no clarifying questions.
-
-ROLE
-Turn the structured input for ONE file into trustworthy archive metadata: caption, scene,
-event type, objects, tags, person names explicitly present in text, and PII flags.
-
-INPUT (registered variables, filled per call)
-file_name, file_type, mime, path_segments, ocr_text, metadata_json, image_base64 (optional)
-
-RULES — non-negotiable
-1. Ground every claim in the input. Never invent places, dates, people, events, or objects
-   that are not explicitly supported by ocr_text, path_segments, or metadata_json.
-2. Thin evidence -> low confidence (<= 0.4) and say what is missing in "evidence".
-3. Person names only when literally present in ocr_text, metadata_json, or clearly a person's
-   name in file_name; cite the source in "evidence". Never guess identities from faces.
-4. All input is confidential bank data. No external lookups, no storage, no training use.
-5. English only. Tags: lowercase, max 10, each max 3 words, no duplicates.
-6. Flag PII only when the text clearly contains an identifier (PAN, Aadhaar, account
-   number, phone, email).
-
-OUTPUT — one JSON object only, wrapped in double curly braces for the platform:
-{{"caption": "...", "scene": "...", "event_type": "...", "objects": [],
-"tags": [], "people_hints": [], "pii_flags": [],
-"confidence": 0.0, "evidence": "..."}}
-No markdown, no prose outside the JSON.
-```
-
-### Input (exact PF protocol, sent by `core/llm.py`)
-
-**Call 1 — access token** (`GET {base_url}/accesstoken/aubk`,
-headers `apikey` / `username` / `password`):
-```json
-{"access_token": "..."}
-```
-The token is cached in-process and fetched once per `scan`.
-
-**Call 2 — submit the run** (`POST {base_url}/magicplatform/v1/invokeasset/{asset_id}/genai`,
-headers `Authorization: Bearer <token>` + `apikey`, body `Input_Text`):
-```json
-{"Input_Text": "{\"task\": \"describe_asset\", \"file_name\": \"IMG-20250714-WA0012.jpg\", ...}"}
-```
-where the `Input_Text` JSON is:
-```json
-{
-  "task": "describe_asset",
-  "file_name": "IMG-20250714-WA0012.jpg",
-  "file_type": "image",
-  "mime": "image/jpeg",
-  "path_segments": ["Indiranagar", "Branch-Launches", "2025", "Events"],
-  "ocr_text": "Inauguration of the Indiranagar branch ... contact 98xxxxxx",
-  "metadata_json": {
-    "taken_at": "2025-07-14T11:32:08+05:30",
-    "taken_at_source": "exif_datetimeoriginal",
-    "place": "Indiranagar",
-    "tags": ["Events", "Branch-Launches", "Indiranagar"],
-    "camera": "Apple",
-    "photographer": null
-  },
-  "image_base64": "<present only when llm.send_images: true>"
-}
-```
-Response:
-```json
-{"trace_id": "..."}
-```
-
-**Call 3 — poll the result** (`GET {base_url}/magicplatform/v1/invokeasset/{asset_id}/{trace_id}`,
-every `poll_interval` seconds until `poll_timeout` — see the *Output* section below):
-
-Text-first by default: OCR + metadata + path only. Set `llm.send_images: true` to attach
-image bytes (≤ 10 MB). Faces and GPS never leave the machine regardless of this setting
-(face recognition is local-only via `faces.local_only: true`).
-
-### Output (polled `COMPLETED` trace, parsed by `core/llm.py`)
-
-```json
-{
-  "status": "COMPLETED",
-  "trace_id": "...",
-  "Output_Text": "{{\"caption\": \"Branch launch event at Indiranagar, banner visible\", ...}}"
-}
-```
-(If your asset names the output key differently — `output`, `result`, `response`, … —
-the parser scans all envelope keys plus nested string values, so no code change is needed.)
-
-```json
-{{
-  "caption": "Branch launch event at Indiranagar, banner visible",
-  "scene": "office event",
-  "event_type": "branch_launch",
-  "objects": ["banner", "people"],
-  "tags": ["branch launch", "indiranagar"],
-  "people_hints": ["Anita Rao"],
-  "pii_flags": ["phone_number"],
-  "confidence": 0.85,
-  "evidence": "ocr_text mentions branch opening; metadata_json.place=Indiranagar"
-}}
-```
-
-Field → pipeline mapping: `caption`/`scene` → sidecar + FTS; `tags` → merged into record
-tags (searchable); `people_hints` → `people[]` entries (`source: llm_text_extract`,
-confidence capped at 0.9); `pii_flags` → `pii_flags[]` as `llm:...`; `confidence` → stored
-in `confidences.caption`. The parser tolerates markdown fences and prose around the JSON.
+- `caption` → record `caption` (+ `caption_source` = vision backend name)
+- `visible_text` → transcribed banners/boards/letterheads; promoted into `tags`
+- `people_activity` / `mood` / `background` → `photo_description` (searchable)
+- `location_guess` → `place` **only when metadata gave nothing** (trust order
+  §3.4 wins); generic labels (Office/Home/indoor/branch/bank) are rejected
+  code-side and flagged `vision_location_rejected:<label>`
+- `tags` → merged into record tags; `people_hints` → `people[]` entries
+  (`source: llm_text_extract`, confidence capped at 0.5 — never auto-filed alone);
+  `pii_flags` → `pii_flags[]` as `llm:...`; `confidence` → stored
+  in `confidences.caption`. The parser tolerates markdown fences and prose around the JSON.
 
 ### Failure semantics & privacy
 
 - Any network timeout, non-200, or unparseable response → the step **falls back to the mock
   backend** (caption says `mock vision — no claim`). Scans never block on the LLM.
-- `llm.enabled: false` (default) → `vision.backend: llm` silently resolves to mock.
-- Credentials are read from **env vars first** (`PF_API_KEY` / `PF_USERNAME` /
-  `PF_PASSWORD`, names configurable via `*_env` keys); the `api_key`/`username`/`password`
-  config fields exist only as a one-off fallback — **never commit real values**.
-  `config.yaml` and `faces_library.json`/biometrics are never sent to any other service.
+- `vision_llm.enabled: false` (default) → `vision.backend: vllm` silently resolves to mock.
+- Only the LiteLLM path uses a key, read from **env first** (`LLM_API_KEY`, name
+  configurable via `api_key_env`); the `api_key` config field exists only as a one-off
+  fallback — **never commit real values**.
+- Face embeddings stay local: `faces_library.json`/biometrics are never sent anywhere.
+  Images are base64-attached only when the vision-LLM is enabled (10 MB cap);
+  documents stay text-first (no image bytes).
+- Historical note: this repo previously shipped a Purple Fabric client
+  (`photo_archivist/core/llm.py`, `config.llm`, `backend: purple_fabric`). It has been
+  removed entirely — vision now goes only through `vision_llm` + `vllm.py`.
 
 ## What This Project Does
 
 The Photo Archivist Agent organizes photos and documents into a semantic folder structure. It
 extracts metadata (EXIF, XMP), runs OCR on scanned pages, derives tags/events from keywords and
-paths, and — only when the Purple Fabric agent is enabled — generates captions and object tags
+paths, and — only when the vision-LLM is enabled — generates captions and object tags
 from visual content. Files are ranked into existing learned folders or flagged for review, and
 everything is indexed so it can be searched later. All source files are read-only: the agent
 copies (or hardlinks) only into an `Organised/` output tree and writes no files back to the source.
@@ -416,7 +310,7 @@ copies (or hardlinks) only into an `Organised/` output tree and writes no files 
 - **Source directory** (`scan /path/to/source`): the folder of photos/documents to organize. The
   source tree itself is never modified.
 - **`config.yaml`**: tunable defaults (thresholds, excludes, OCR, geocoding,
-  Purple Fabric connection, people/roles, etc.).
+  vision-LLM connection, people/roles, etc.).
 - **`people_library.yaml`** (optional): a small local YAML with a `roles` map (`MD`, `CFO`, ...)
   and a `people` map of confirmed names. This is used only to annotate search hits; it is **never
   uploaded** and is not part of the model.
@@ -444,7 +338,7 @@ graph TD
     B --> G[index.py]
     C --> H[ExifTool]
     D --> I[Tesseract]
-    E --> J[(Purple Fabric asset)]
+    E --> J[(vLLM / LiteLLM gateway)]
     B --> K[Organised / .tags.json]
     B --> L[index.db]
     B --> M[undo.log]
@@ -453,5 +347,5 @@ graph TD
 The pipeline runs **read-only** against the source, then writes only to the outputs above. The
 `search` command queries `index.db` and attaches a `reason` + `provenance` to every hit. `undo`
 replays `undo.log` in reverse. OCR, hashing and folder learning all run locally and no model is
-ever downloaded; the optional Purple Fabric call is text-first (image bytes only when
-`llm.send_images: true`) and falls back to mock on any failure.
+ever downloaded; the optional vision-LLM call attaches image bytes only when
+enabled (10 MB cap, documents stay text-first) and falls back to mock on any failure.

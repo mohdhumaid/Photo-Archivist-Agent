@@ -4,7 +4,7 @@ import re
 import sqlite3
 
 # Fields indexed in files_fts (keep in sync with index.SCHEMA).
-_TEXT_FIELDS = ("caption", "tags", "ocr_text", "source_path",
+_TEXT_FIELDS = ("caption", "photo_description", "tags", "ocr_text", "source_path",
                 "place_value", "event_value")
 
 

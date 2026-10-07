@@ -1,4 +1,4 @@
-"""Step 5: Vision interface — primed with metadata, 1 call/asset. Local + Mock."""
+"""Step 5: Vision interface - primed with metadata, 1 call/asset. vLLM + Mock."""
 from __future__ import annotations
 from dataclasses import dataclass, field
 
@@ -11,11 +11,15 @@ class VisionResult:
     objects: list = field(default_factory=list)
     visible_text: str = ""
     face_boxes: list = field(default_factory=list)
-    face_embeddings: list = field(default_factory=list)  # one 512-d vector per face
-    image_vec: list | None = None                        # CLIP embedding, when available
+    face_embeddings: list = field(default_factory=list)  # one vector per face
+    image_vec: list | None = None
     tags: list = field(default_factory=list)
-    people_hints: list = field(default_factory=list)  # text-grounded names from the LLM
-    pii_flags: list = field(default_factory=list)     # LLM-detected identifiers
+    people_hints: list = field(default_factory=list)  # text-grounded names only
+    people_activity: str = ""
+    mood: str = ""
+    background: str = ""
+    location_guess: dict = field(default_factory=dict)
+    pii_flags: list = field(default_factory=list)
     confidences: dict = field(default_factory=dict)
     backend: str = "mock"
 
@@ -34,30 +38,25 @@ class MockVision(VisionBackend):
             bits.append(str(prime["place"]))
         if prime.get("event_hint"):
             bits.append(str(prime["event_hint"]))
-        caption = ("; ".join(bits) or "unexamined asset") + " (mock vision — no claim)"
+        caption = ("; ".join(bits) or "unexamined asset") + " (mock vision - no claim)"
         return VisionResult(caption=caption, backend="mock",
                             confidences={"caption": 0.1})
 
 
-class LLMVision(VisionBackend):
-    """Purple Fabric Automation Digital Expert — returns mock on any failure."""
+class VLLMVision(VisionBackend):
+    """Generic OpenAI-compatible vision backend: local vLLM *or* LiteLLM gateway.
+
+    Config (config.yaml -> vision_llm): base_url, model, enabled, api_key_env
+    (LiteLLM only), temperature, max_tokens, video_mode (keyframe|file_url).
+    Mock on any failure - never crashes a scan.
+    """
 
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or {}
 
     def describe(self, path: str, prime: dict) -> VisionResult:
-        import os
-        from . import llm as llmmod
-        variables = {
-            "file_name": prime.get("file_name") or os.path.basename(path),
-            "file_type": prime.get("file_type") or "",
-            "mime": prime.get("mime") or "",
-            "path_segments": prime.get("path_segments") or [],
-            "ocr_text": prime.get("ocr_text") or "",
-            "metadata_json": prime.get("metadata") or {},
-        }
-        llmmod.attach_image(self.cfg, path, variables)
-        out = llmmod.enrich(self.cfg, variables)
+        from . import vllm as vllmmod
+        out = vllmmod.describe(self.cfg, path, prime)
         if not isinstance(out, dict) or not out.get("caption"):
             return MockVision().describe(path, prime)  # honest fallback
         try:
@@ -70,21 +69,31 @@ class LLMVision(VisionBackend):
             scene=str(out.get("scene") or ""),
             event_type=str(out.get("event_type") or ""),
             objects=[str(x) for x in (out.get("objects") or [])][:50],
+            visible_text=str(out.get("visible_text") or ""),
             tags=[str(x) for x in (out.get("tags") or [])][:20],
             people_hints=[str(x) for x in (out.get("people_hints") or [])][:20],
+            people_activity=str(out.get("people_activity") or ""),
+            mood=str(out.get("mood") or ""),
+            background=str(out.get("background") or ""),
+            location_guess=dict(out.get("location_guess") or {}),
             pii_flags=[str(x) for x in (out.get("pii_flags") or [])][:20],
             confidences={"caption": conf, "llm": conf},
-            backend="purple_fabric")
+            backend="vllm")
+
+
+# Legacy alias: "llm" was the Purple Fabric backend name. It now resolves to
+# the vLLM/LiteLLM gateway (or mock when unconfigured) so stale configs keep
+# working without the removed purple-fabric client.
+LLMVision = VLLMVision
 
 
 def get_backend(name: str, cfg: dict | None = None) -> VisionBackend:
     if name == "mock":
         return MockVision()
-    if name == "llm":
-        from . import llm as llmmod
-        if llmmod.enabled(cfg):
-            return LLMVision(cfg)
+    if name in ("llm", "vllm", "local"):
+        from . import vllm as vllmmod
+        if vllmmod.enabled(cfg):
+            return VLLMVision(cfg)
         return MockVision()   # not configured -> mock, never a crash
-    # "local" backends are unavailable under org policy (no model downloads);
-    # route to mock so a stale config never crashes a scan.
+    # unknown backend name -> mock so a stale config never crashes a scan.
     return MockVision()

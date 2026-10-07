@@ -133,6 +133,45 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
+def validate_llm_output(out: dict | None) -> list[str]:
+    """Sanity-check a parsed vision-LLM response. Returns [] when PROPER.
+
+    Checks what the pipeline actually consumes: a real caption, well-typed
+    tags/objects/people_hints, confidences inside 0..1, and no mock
+    fallback text leaking into the caption.
+    """
+    issues: list[str] = []
+    if not isinstance(out, dict):
+        return ["response did not parse into a JSON object (or describe() returned None "
+                f"- LAST_ERROR: {LAST_ERROR or 'none'})"]
+    caption = out.get("caption")
+    if not isinstance(caption, str) or not caption.strip():
+        issues.append("caption missing or empty")
+    else:
+        if len(caption.strip()) < 5:
+            issues.append(f"caption too short to be useful: {caption!r}")
+        if "mock vision" in caption.lower():
+            issues.append("caption is the MOCK fallback - the LLM was not reached")
+    for key in ("tags", "objects", "people_hints", "pii_flags"):
+        v = out.get(key)
+        if v is None:
+            continue
+        if not isinstance(v, list):
+            issues.append(f"{key} should be a list, got {type(v).__name__}")
+        else:
+            bad = [x for x in v if not isinstance(x, str) or not x.strip()]
+            if bad:
+                issues.append(f"{key} contains non-string/empty entries: {bad[:3]}")
+    conf = out.get("confidence")
+    if conf is not None:
+        try:
+            if not (0.0 <= float(conf) <= 1.0):
+                issues.append(f"confidence {conf} outside 0..1")
+        except (TypeError, ValueError):
+            issues.append(f"confidence not numeric: {conf!r}")
+    return issues
+
+
 def build_messages(cfg: dict | None, path: str, prime: dict) -> tuple:
     """OpenAI-style messages. Returns (messages, keyframe_to_cleanup|None)."""
     c = vllm_cfg(cfg)
@@ -189,6 +228,7 @@ def build_messages(cfg: dict | None, path: str, prime: dict) -> tuple:
 
 
 LAST_ERROR: str = ""
+LAST_RAW_TEXT: str = ""
 
 
 def _post(cfg: dict | None, messages: list) -> dict | None:
@@ -266,6 +306,8 @@ def scrub_location_guess(out: dict | None) -> dict | None:
 
 def describe(cfg: dict | None, path: str, prime: dict) -> dict | None:
     """Build messages -> POST -> parse JSON (None on any failure)."""
+    global LAST_RAW_TEXT
+    LAST_RAW_TEXT = ""
     if not enabled(cfg):
         return None
     messages, tmp_frame = build_messages(cfg, path, prime)
@@ -286,7 +328,8 @@ def describe(cfg: dict | None, path: str, prime: dict) -> dict | None:
                         parts.append(pt)
                 flat.append({"role": m.get("role"), "content": parts})
             resp = _post(cfg, flat)
-        out = _extract_json(_message_text(resp) or "")
+        LAST_RAW_TEXT = _message_text(resp) or ""
+        out = _extract_json(LAST_RAW_TEXT)
         if not isinstance(out, dict) or not out.get("caption"):
             return None
         out["location_guess"] = scrub_location_guess(out)
@@ -297,8 +340,6 @@ def describe(cfg: dict | None, path: str, prime: dict) -> dict | None:
                 os.remove(tmp_frame)
             except OSError:
                 pass
-
-    return re.sub(r"<think>.*?</think>", "", text or "", flags=re.S).strip()
 
 
 def _data_url(path: str, mime: str = "") -> str | None:

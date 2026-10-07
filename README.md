@@ -30,6 +30,9 @@ python -m photo_archivist.cli enroll faces/sanjay\ agarwal.png --name "Sanjay Ag
 # 6. Environment readiness (binaries / OpenCV faces / vision-LLM / faces library)
 python -m photo_archivist.cli check
 
+# 7. Verify the LLM output is PROPER (raw text + parsed JSON + PASS/FAIL checks)
+python -m photo_archivist.cli llmtest faces/sanjay\ agarwal.png
+
 # Optional: face-box detection & enrollment (Haar cascade ships INSIDE the wheel — verify
 # your corporate proxy allows PyPI first:  pip download --no-deps opencv-python-headless -d /tmp/t )
 pip install -e .[faces]
@@ -279,6 +282,26 @@ which the pipeline merges with full provenance:
   `pii_flags` → `pii_flags[]` as `llm:...`; `confidence` → stored
   in `confidences.caption`. The parser tolerates markdown fences and prose around the JSON.
 
+### Checking that the LLM output is proper
+
+Two layers verdict what the gateway returns:
+
+```bash
+# A) endpoint + payload probe (standalone, self-contained)
+python tools/check_litellm.py --base-url <.../v1/chat/completions> \
+       --model "Qwen3 Vision 235b" [--image photo.jpg]     # key: .env / --api-key
+
+# B) the app REAL vision path on one image -> exit 0 PROPER / 2 NOT PROPER
+python -m photo_archivist.cli llmtest faces/sanjay\ agarwal.png
+```
+
+`llmtest` prints the raw model text, the parsed JSON, then runs
+`vllm.validate_llm_output()`: caption present & non-trivial, `tags`/`objects`/
+`people_hints` are string lists, `confidence` inside 0..1, and no
+`mock vision` fallback leaking into the caption (that means the gateway was
+never reached). The same validator guards the parse path: any unparseable or
+badly-shaped response falls back to mock and records `caption_source: mock`.
+
 ### Failure semantics & privacy
 
 - Any network timeout, non-200, or unparseable response → the step **falls back to the mock
@@ -328,6 +351,8 @@ copies (or hardlinks) only into an `Organised/` output tree and writes no files 
 
 ## Architecture
 
+### Component map
+
 ```mermaid
 graph TD
     A[User: scan / search / undo] --> B[CLI]
@@ -342,6 +367,50 @@ graph TD
     B --> K[Organised / .tags.json]
     B --> L[index.db]
     B --> M[undo.log]
+```
+
+### Direction flow — `scan` pipeline (per file, read-only source)
+
+```mermaid
+flowchart TD
+    SRC[Source file<br/>read-only] --> DET{Type?}
+    DET -->|image| META[ExifTool + XMP + Takeout]
+    DET -->|document| OCR[Tesseract OCR]
+    DET -->|video| VF[keyframe via ffprobe]
+    META --> RECON[Reconcile date/place/trust]
+    OCR --> RECON
+    VF --> RECON
+    RECON --> VIS{vision.backend?}
+    VIS -->|mock| VM[Mock caption<br/>no claim]
+    VIS -->|vllm| LLM[LiteLLM / vLLM gateway<br/>caption, tags, people_hints]
+    LLM -->|timeout / 4xx / bad JSON| VM
+    LLM --> VVAL{llmtest / validate<br/>caption + types + 0..1}
+    VVAL -->|PROPER| VOUT[Parsed vision fields]
+    VOUT --> FMERGE[Merge tags / hints / location<br/>with provenance]
+    VM --> FMERGE
+    FMERGE --> FACE[YuNet detect<br/>raw_face landmarks kept]
+    FACE --> EMB[alignCrop then 128-d SFace<br/>cosine vs faces_library.json]
+    EMB --> FP{Face priority per face}
+    FP -->|XMP region 0.99| P1[Named]
+    FP -->|"match 0.40+"| P1
+    FP -->|filename/folder| P1
+    FP -->|"vision hint 0.5 or less"| P1
+    FP -->|none| P2[Unknown Person N<br/>0.2 then _Review]
+    P1 --> DEC[decide: promote 0.80+<br/>_Review 0.60-0.79<br/>new folder below 0.60]
+    P2 --> DEC
+    DEC --> DR{--dry-run?}
+    DR -->|yes| PLAN[Print plan<br/>writes nothing]
+    DR -->|"--no-dry-run --yes"| WRITE[Copy to Organised/<br/>+ .tags.json + index.db<br/>+ undo.log]
+```
+
+### Direction flow — `search` and `undo`
+
+```mermaid
+flowchart LR
+    Q[Query] --> IDX[(index.db)]
+    IDX --> HITS[Hits + reason + provenance]
+    U[undo.log] --> REV[Replay in reverse]
+    REV --> CLEAN[Organised/ restored<br/>index entries dropped]
 ```
 
 The pipeline runs **read-only** against the source, then writes only to the outputs above. The

@@ -274,5 +274,55 @@ def check():
     raise typer.Exit(0 if required_ok else 1)
 
 
+@app.command()
+def llmtest(image: str, config: str = "config.yaml"):
+    """Send ONE image through the real vision-LLM path and verdict its output.
+
+    Prints the raw model text, the parsed JSON, and PASS/FAIL per check
+    (caption present, tags well-typed, confidence in 0..1, no mock leak).
+    Exit 0 = LLM OUTPUT PROPER, exit 2 = NOT PROPER (details below).
+    """
+    import mimetypes
+    cfg = load_cfg(config)
+    from .core import vllm as vllmmod
+    if not vllmmod.enabled(cfg):
+        typer.echo("vision_llm disabled or incomplete: set vision_llm.enabled=true, "
+                   "base_url and model in config.yaml first.")
+        raise typer.Exit(2)
+    if not os.path.isfile(image):
+        typer.echo(f"image not found: {image}")
+        raise typer.Exit(2)
+    vc = vllmmod.vllm_cfg(cfg)
+    typer.echo(f"model   : {vc.get('model')}")
+    typer.echo(f"endpoint: {vc.get('base_url')}")
+    prime = {
+        "file_name": os.path.basename(image),
+        "file_type": "image",
+        "mime": mimetypes.guess_type(image)[0] or "image/jpeg",
+        "path_segments": [p for p in os.path.dirname(image).split(os.sep) if p][-3:],
+        "ocr_text": "",
+        "metadata": {},
+    }
+    out = vllmmod.describe(cfg, image, prime)
+    raw = vllmmod.LAST_RAW_TEXT or ""
+    typer.echo("\n--- raw model text (first 600 chars) ---")
+    typer.echo(raw[:600] or "(none)")
+    typer.echo("\n--- parsed output ---")
+    typer.echo(json.dumps(out, indent=2, default=str) if out is not None
+               else f"(None) LAST_ERROR: {vllmmod.LAST_ERROR or 'none'}")
+    issues = vllmmod.validate_llm_output(out)
+    typer.echo("\n--- checks ---")
+    if issues:
+        for i in issues:
+            typer.echo(f"FAIL  {i}")
+        typer.echo("\nVERDICT: LLM OUTPUT NOT PROPER")
+        raise typer.Exit(2)
+    typer.echo("PASS  caption present & non-trivial")
+    typer.echo("PASS  tags/objects/people_hints well-typed (or absent)")
+    typer.echo("PASS  confidence within 0..1 (or absent)")
+    typer.echo("PASS  no mock-fallback leak")
+    typer.echo("\nVERDICT: LLM OUTPUT PROPER")
+
+
 if __name__ == "__main__":
     app()

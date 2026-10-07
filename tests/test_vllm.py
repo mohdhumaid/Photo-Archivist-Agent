@@ -167,3 +167,29 @@ def test_metadata_place_wins_over_llm_guess(tmp_path):
     assert rec["place"]["value"] != "Office"
     assert any("vision_location_rejected" in f for f in rec["pii_flags"])
 
+
+def test_validate_llm_output_proper():
+    from photo_archivist.core.vllm import validate_llm_output
+    good = {"caption": "Team at the Indiranagar branch launch", "tags": ["launch", "team"],
+            "objects": ["banner"], "people_hints": ["Anita Rao"], "confidence": 0.82,
+            "pii_flags": []}
+    assert validate_llm_output(good) == []
+    # minimal-but-valid: only caption
+    assert validate_llm_output({"caption": "Office desk with laptop"}) == []
+
+
+def test_validate_llm_output_flags_bad_shapes():
+    from photo_archivist.core.vllm import validate_llm_output
+    assert validate_llm_output(None)            # not parseable
+    assert validate_llm_output({})              # missing caption
+    assert validate_llm_output({"caption": "x"})  # too short
+    issues = validate_llm_output({
+        "caption": "A photo (mock vision - no claim)",
+        "tags": "not-a-list", "confidence": 4.2,
+        "people_hints": ["ok", ""]})
+    text = " ".join(issues)
+    assert "MOCK fallback" in text
+    assert "tags should be a list" in text
+    assert "confidence 4.2 outside 0..1" in text
+    assert "non-string/empty" in text
+

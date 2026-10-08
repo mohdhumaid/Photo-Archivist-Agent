@@ -5,19 +5,62 @@ import sqlite3
 
 # Fields indexed in files_fts (keep in sync with index.SCHEMA).
 _TEXT_FIELDS = ("caption", "photo_description", "tags", "ocr_text", "source_path",
-                "place_value", "event_value")
+                "place_value", "event_value", "organised_path")
+
+_MONTHS = {"jan": "01", "feb": "02", "mar": "03", "apr": "04",
+           "may": "05", "jun": "06", "jul": "07", "aug": "08",
+           "sep": "09", "oct": "10", "nov": "11", "dec": "12"}
+_MONTHS_REV = {v: k for k, v in _MONTHS.items()}
+
+
+def _folder_text(r: dict) -> str:
+    """organised_path normalised for date/place searching."""
+    op = str(r.get("organised_path") or "")
+    return (op.replace("/", " ").replace(chr(92), " ")
+              + " " + op.replace("/", "").replace(chr(92), "")).lower()
 
 
 def _blob(r: dict) -> str:
     """Lowercased text haystack used for substring matching / reasons."""
-    return " ".join(str(r.get(k) or "") for k in _TEXT_FIELDS).lower()
+    bits = [str(r.get(k) or "") for k in _TEXT_FIELDS]
+    # folder tokens work twice: '2025/2025-07/...' as pieces AND spaceless,
+    # so '202507'/'20250714' queries hit year-month paths too.
+    op = str(r.get("organised_path") or "")
+    bits.append(op.replace("/", " ").replace(chr(92), " "))
+    bits.append(op.replace("/", "").replace(chr(92), ""))
+    return " ".join(bits).lower()
+
+
+def _term_aliases(term: str) -> set:
+    """Alternate spellings for one query term (month bridging only).
+
+    Folder paths store numbers ('2025-07'); users type words ('july').
+    A term counts as matched when it OR any alias appears in the row text.
+    """
+    w = (term or "").lower()
+    if w in _MONTHS:                              # 'july' -> '07', 'jul'
+        return {_MONTHS[w], w[:3]}
+    for name, num in _MONTHS.items():             # 'jul' -> '07'
+        if w == name:
+            return {num}
+    return set()
 
 
 def parse_query(q: str, role_map: dict | None = None) -> dict:
-    f: dict = {"terms": [], "person": None, "place": None, "year": None, "type": None}
-    m = re.search(r"\b(19|20)\d{2}\b", q)
+    f: dict = {"terms": [], "person": None, "place": None, "year": None,
+           "year_month": None, "month": None, "type": None}
+    m = re.search(r"\b((?:19|20)\d{2})(?:[-/]?(0?[1-9]|1[0-2]))?\b", q or "")
     if m:
-        f["year"] = m.group(0)
+        f["year"] = m.group(1)
+        if m.group(2):
+            f["year_month"] = f"{f['year']}-{m.group(2).zfill(2)}"
+    low0 = (q or "").lower()
+    for name, num in _MONTHS.items():
+        if re.search(rf"\b{name}", low0) or re.search(rf"\b{name[:3]}", low0):
+            f["month"] = num
+            break
+    if f["year"] and f["month"] and not f["year_month"]:
+        f["year_month"] = f"{f['year']}-{f['month']}"   # 'july 2025' -> 2025-07
     low = q.lower()
     # Only treat as type filter when the word stands alone-ish; 'letter' is
     # usually content ("sanction letter"), not a type request.
@@ -69,7 +112,19 @@ def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 
         rows = [r for r in rows
                 if y in (r["taken_at"] or "")
                 or y in (r["ocr_text"] or "") or y in (r["caption"] or "")
-                or y in (r["tags"] or "") or y in (r["source_path"] or "")]
+                or y in (r["tags"] or "") or y in (r["source_path"] or "")
+                or y in _folder_text(r)]
+    # month-qualified queries: broaden the evidence to taken_at, folders and
+    # free text (YYYY-MM/YYYYMM in paths: '202507' hits '2025/2025-07/...').
+    if filt["year_month"] or filt["month"]:
+        ym = filt["year_month"]
+        needles = {ym, ym.replace("-", "")} if ym else set()
+        if filt["month"]:
+            needles.add(filt["month"])                   # numeric '07'
+            needles.add(_MONTHS_REV[filt["month"]])      # short 'jul'
+        rows = [r for r in rows
+                if any(n in (r["taken_at"] or "").replace("-", "").replace(":", "")
+                       or n in _folder_text(r) or n in _blob(r) for n in needles)]
     # FTS: prefix match each term ("Akhil" matches "AkhilVerma"). FTS returns
     # rowids; map them back to file_id (files.rowid == files_fts.rowid).
     try:
@@ -132,7 +187,9 @@ def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 
     scored: list[dict] = []
     for r in rows:
         blob = " ".join(_blob(r).split())
-        matched = [t for t in filt["terms"] if t.lower() in blob]
+        matched = [t for t in filt["terms"]
+                   if t.lower() in blob
+                   or any(a in blob for a in _term_aliases(t))]
         coverage = (len(matched) / len(filt["terms"])) if filt["terms"] else 1.0
         phrase = bool(norm_q) and norm_q in blob
         fts = r["file_id"] in hits
@@ -152,8 +209,11 @@ def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 
             chosen = tier1          # precision: drop partial-keyword noise
         else:
             floor = 0.5 if len(filt["terms"]) >= 2 else 1.0
+            # rows that survived a year/month filter carry date evidence even
+            # when the digits aren't repeated in the text blob ('2026' files).
+            date_ok = bool(filt.get("year") or filt.get("year_month") or filt.get("month"))
             chosen = [s for s in scored if s["coverage"] >= floor
-                      or s["phrase"] or s["person_hit"]]
+                      or s["phrase"] or s["person_hit"] or date_ok]
     else:
         chosen = scored
     chosen.sort(key=lambda s: -s["score"])

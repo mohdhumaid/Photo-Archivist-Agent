@@ -199,12 +199,19 @@ Organised/Inbox/AkhilVerma.jpeg :: Cline / Images (from path) · 2026-10-05T22:3
 
 - Every hit carries a `reason` built from provenance — where each fact came from
   (`path`, `exif`, `fs_birthtime`, face match, etc.).
-- Queries are **filtered**, not just ranked: rows are kept only if they actually match a
-  term (FTS prefix match, so `Akhil` finds `AkhilVerma.jpeg`, or substring across
-  caption/tags/OCR/path/place/event).
+- Queries are **filtered**, not just ranked: when any row matches **all** terms
+  (or the full phrase, or a named person), only those win and partial
+  single-keyword noise is dropped (`Yogesh Jain` never returns `Yogesh Soni`).
+  Otherwise rows need ≥0.5 term coverage, ordered by semantic score
+  (phrase + person + coverage + query↔record cosine).
+- Dates come from **everywhere**, including the folder path itself (`YYYY/YYYY-MM/...`):
+  `2026`, `2026-10`, `july 2025` (month words ↔ folder numbers bridged both ways).
+- Event/folder words match (`branch launches` finds `Organised/2025/2025-07/Branch Launches/...`),
+  as do people quoted (`"Anita Rao"`), roles (`MD`), years (`2023`), and plain terms.
+- Folder names are full-text indexed; opening an old `index.db` rebuilds its FTS
+  automatically on first `search` (`connect()` migrates in place).
 - A query that matches nothing prints `No matches.` — expected for text that isn't in your
   library (e.g. `Indiranagar branch launch` on stock avatars with no OCR text).
-- Year words (`2023`) are matched broadly against `taken_at`, OCR, caption, tags, and path.
 
 
 

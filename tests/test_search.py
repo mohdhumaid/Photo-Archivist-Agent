@@ -172,3 +172,43 @@ def test_partial_matches_ranked_by_semantic_coverage(tmp_path):
     assert "suit2" not in [h["file_id"] for h in hits]
     assert all(h["score"] >= hits[-1]["score"] for h in hits)  # sorted desc
 
+
+def test_search_by_year_in_organised_folder(tmp_path):
+    """'2025' matches files filed under year folders even without EXIF year."""
+    from photo_archivist.core import index as _idx
+    db = str(tmp_path / "y.db")
+    c = _idx.connect(db)
+    _idx.upsert_file(c, {"file_id": "y1", "sha256": "a" * 64, "type": "image",
+        "source_path": "/src/pic.jpg",
+        "organised_path": "Organised/2025/2025-07/Indiranagar - Branch Launches/pic.jpg",
+        "caption": "team photo", "tags": ["team"], "ocr_text": "",
+        "taken_at": None, "taken_at_source": None, "taken_at_confidence": 0.3,
+        "people": [], "vectors": {"text": None}})
+    _idx.upsert_file(c, {"file_id": "y2", "sha256": "b" * 64, "type": "image",
+        "source_path": "/src/other.jpg",
+        "organised_path": "Organised/2023/Docs/other.jpg",
+        "caption": "old scan", "tags": [], "ocr_text": "",
+        "taken_at": None, "taken_at_source": None, "taken_at_confidence": 0.3,
+        "people": [], "vectors": {"text": None}})
+    c.close()
+    assert [h["file_id"] for h in searchmod.search(db, "2025")] == ["y1"]
+    assert [h["file_id"] for h in searchmod.search(db, "2023")] == ["y2"]
+
+
+def test_search_by_event_and_month_forms(tmp_path):
+    """Event/folder words match; 2025-07 and 'july 2025' hit the same folder."""
+    from photo_archivist.core import index as _idx
+    db = str(tmp_path / "e.db")
+    c = _idx.connect(db)
+    _idx.upsert_file(c, {"file_id": "e1", "sha256": "a" * 64, "type": "image",
+        "source_path": "/src/a.jpg",
+        "organised_path": "Organised/2025/2025-07/Branch Launches/a.jpg",
+        "caption": "group photo", "tags": [], "ocr_text": "",
+        "taken_at": "2025-07-14T00:00:00", "taken_at_source": "exif",
+        "taken_at_confidence": 0.9, "people": [],
+        "vectors": {"text": None}})
+    c.close()
+    assert [h["file_id"] for h in searchmod.search(db, "branch launches")] == ["e1"]
+    assert [h["file_id"] for h in searchmod.search(db, "2025-07")] == ["e1"]
+    assert [h["file_id"] for h in searchmod.search(db, "july 2025")] == ["e1"]
+

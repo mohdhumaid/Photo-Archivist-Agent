@@ -23,14 +23,51 @@ CREATE TABLE IF NOT EXISTS folders(
  name TEXT PRIMARY KEY, centroid BLOB, tags TEXT, people TEXT,
  place TEXT, date_from TEXT, date_to TEXT, pattern TEXT);
 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
- caption, photo_description, tags, ocr_text, source_path, place_value, event_value);
+ caption, photo_description, tags, ocr_text, source_path, place_value, event_value,
+ organised_path);
 """
 
 
 def connect(db_path: str) -> sqlite3.Connection:
     c = sqlite3.connect(db_path)
     c.executescript(SCHEMA)
+    _ensure_fts(c)
     return c
+
+
+def _ensure_fts(c: sqlite3.Connection) -> None:
+    """Rebuild files_fts when a pre-organised_path DB is opened.
+
+    FTS5 tables never gain columns by themselves, so an index.db created
+    before folder-name search existed keeps dropping folder matches. Detect
+    the old shape and rebuild the full-text rows in place (files untouched).
+    """
+    try:
+        cols = [r[1] for r in c.execute("PRAGMA table_info(files_fts)").fetchall()]
+    except Exception:
+        return
+    if "organised_path" in cols:
+        return
+    try:
+        c.execute("DROP TABLE files_fts")
+    except Exception:
+        pass
+    c.execute("CREATE VIRTUAL TABLE files_fts USING fts5(caption, "
+              "photo_description, tags, ocr_text, source_path, place_value, "
+              "event_value, organised_path)")
+    for r in c.execute("SELECT rowid, caption, photo_description, tags, ocr_text, "
+                       "source_path, place_value, event_value, organised_path "
+                       "FROM files").fetchall():
+        try:
+            tags = " ".join(json.loads(r[3] or "[]"))
+        except Exception:
+            tags = str(r[3] or "")
+        c.execute("INSERT INTO files_fts(rowid, caption, photo_description, tags, "
+                  "ocr_text, source_path, place_value, event_value, organised_path) "
+                  "VALUES(?,?,?,?,?,?,?,?,?)",
+                  (r[0], r[1] or "", r[2] or "", tags, r[4] or "", r[5] or "",
+                   r[6] or "", r[7] or "", r[8] or ""))
+    c.commit()
 
 
 def _vec_blob(v) -> bytes | None:
@@ -88,12 +125,13 @@ def upsert_file(c: sqlite3.Connection, rec: dict) -> None:
         "(SELECT rowid FROM files WHERE file_id=?)",
         (rec.get("file_id"),))
     c.execute(
-        "INSERT INTO files_fts(rowid,caption,photo_description,tags,ocr_text,source_path,place_value,event_value)"
-        " VALUES((SELECT rowid FROM files WHERE file_id=?),?,?,?,?,?,?,?)",
+        "INSERT INTO files_fts(rowid,caption,photo_description,tags,ocr_text,source_path,place_value,event_value,organised_path)"
+        " VALUES((SELECT rowid FROM files WHERE file_id=?),?,?,?,?,?,?,?,?)",
         (rec.get("file_id"), rec.get("caption") or "", rec.get("photo_description") or "",
          " ".join(rec.get("tags", []) or []),
          rec.get("ocr_text") or "", rec.get("source_path") or "",
-         (rec.get("place") or {}).get("value") or "", (rec.get("event") or {}).get("value") or ""),
+         (rec.get("place") or {}).get("value") or "", (rec.get("event") or {}).get("value") or "",
+         rec.get("organised_path") or ""),
     )
     c.commit()
 

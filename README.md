@@ -25,13 +25,13 @@ python -m photo_archivist.cli undo
 
 # 5. Enroll face photos (local template embedding, zero model downloads)
 python -m photo_archivist.cli enroll faces                 # bulk folder enrollment
-python -m photo_archivist.cli enroll faces/sanjay\ agarwal.png --name "Sanjay Agarwal"
+python -m photo_archivist.cli enroll photos/john-doe.png --name "John Doe"
 
 # 6. Environment readiness (binaries / OpenCV faces / vision-LLM / faces library)
 python -m photo_archivist.cli check
 
 # 7. Verify the LLM output is PROPER (raw text + parsed JSON + PASS/FAIL checks)
-python -m photo_archivist.cli llmtest faces/sanjay\ agarwal.png
+python -m photo_archivist.cli llmtest path/to/photo.jpg
 
 # Optional: face-box detection & enrollment (Haar cascade ships INSIDE the wheel — verify
 # your corporate proxy allows PyPI first:  pip download --no-deps opencv-python-headless -d /tmp/t )
@@ -56,7 +56,7 @@ photo_archivist/core/
   metadata/{exif,docs,video,fs,reconcile,place}.py
   text.py vision.py vllm.py faces.py people.py place.py embed.py
   index.py decide.py organise.py search.py report.py pii.py
-tests/  sample_data/  data/
+tests/  tools/  data/
 ```
 
 Writes go to `Organised/` + `index.db` + sidecar `.tags.json` + `undo.log` only.
@@ -292,7 +292,7 @@ python tools/check_litellm.py --base-url <.../v1/chat/completions> \
        --model "Qwen3 Vision 235b" [--image photo.jpg]     # key: .env / --api-key
 
 # B) the app REAL vision path on one image -> exit 0 PROPER / 2 NOT PROPER
-python -m photo_archivist.cli llmtest faces/sanjay\ agarwal.png
+python -m photo_archivist.cli llmtest path/to/photo.jpg
 ```
 
 `llmtest` prints the raw model text, the parsed JSON, then runs

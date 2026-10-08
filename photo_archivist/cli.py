@@ -239,8 +239,8 @@ def check():
             if 'HTTP 401' in err:
                 typer.echo(f"{'hint':10s} gateway got NO key. Put it in .env first: LLM_API_KEY=sk-...")
                 typer.echo(f"{'':10s}   (or PowerShell: $env:LLM_API_KEY='sk-...') - never config.yaml")
-                typer.echo(f"{'':10s}   standalone: python tools/check_litellm.py --base-url {vc.get('base_url')} --model {vc.get('model')}")
-            elif '404' in err:
+                typer.echo(f"{'':10s}   standalone: python tools/check_litellm.py --base-url {vc.get('base_url')!r} --model {vc.get('model')!r}")
+            elif 'HTTP 404' in err:
                 typer.echo(f"{'hint':10s} 404 = model id or base_url wrong; ask gateway team for exact id.")
             else:
                 typer.echo(f"{'hint':10s} configure vision_llm.model/base_url/api_key_env in config.yaml, then re-run.")

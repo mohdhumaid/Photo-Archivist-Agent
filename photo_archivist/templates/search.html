@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_cards.html" import card %}
+{% block title %}Search · Photo Archivist{% endblock %}
+{% block content %}
+<h1>Search</h1>
+
+<form class="bigq" action="/search" method="get">
+  <input type="search" name="q" value="{{ q }}"
+         placeholder='e.g. "Anita Rao" sanction letter 2023 Indiranagar'>
+  <button type="submit">Search</button>
+</form>
+
+{% if q %}
+  {% if hits %}
+  <p class="hint">{{ hits|length }} hit{{ 's' if hits|length != 1 }} for “{{ q }}”</p>
+  <div class="grid">
+    {% for h in hits %}{{ card(h, reason=h.reason) }}{% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">No matches for “{{ q }}”. Try fewer words, a year, a person, or a place.</p>
+  {% endif %}
+{% else %}
+<p class="empty">Type a query above — matches caption, OCR text, tags, place, event, and people
+with a per-hit reason + provenance (same engine as the CLI).</p>
+{% endif %}
+{% endblock %}

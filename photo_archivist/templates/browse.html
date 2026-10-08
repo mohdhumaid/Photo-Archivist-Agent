@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_cards.html" import card %}
+{% block title %}Browse · Photo Archivist{% endblock %}
+{% block content %}
+<h1>Browse <small>{{ total }} files</small></h1>
+
+<p class="filters">
+  <a href="/browse" {{ 'class=active' if not type_f }}>all</a>
+  <a href="/browse?type=image" {{ 'class=active' if type_f == 'image' }}>images</a>
+  <a href="/browse?type=document" {{ 'class=active' if type_f == 'document' }}>documents</a>
+  <a href="/browse?type=video" {{ 'class=active' if type_f == 'video' }}>videos</a>
+</p>
+
+{% if rows %}
+<div class="grid">
+  {% for r in rows %}{{ card(r) }}{% endfor %}
+</div>
+<p class="pager">
+  {% if page > 1 %}<a href="/browse?page={{ page - 1 }}{{ '&type=' + type_f if type_f }}">&larr; prev</a>{% endif %}
+  <span>page {{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a href="/browse?page={{ page + 1 }}{{ '&type=' + type_f if type_f }}">next &rarr;</a>{% endif %}
+</p>
+{% else %}
+<p class="empty">Nothing indexed yet — run a <code>scan</code> first.</p>
+{% endif %}
+{% endblock %}

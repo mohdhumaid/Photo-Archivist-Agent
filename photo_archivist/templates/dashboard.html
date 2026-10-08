@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Photo Archivist{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<section class="tiles">
+  <div class="tile"><b>{{ stats.files }}</b><span>files indexed</span></div>
+  <div class="tile"><b>{{ stats.images }}</b><span>images</span></div>
+  <div class="tile"><b>{{ stats.documents }}</b><span>documents</span></div>
+  <div class="tile"><b>{{ stats.videos }}</b><span>videos</span></div>
+  <div class="tile"><b>{{ stats.folders }}</b><span>learned folders</span></div>
+  <div class="tile"><b>{{ stats.named }}</b><span>named people</span></div>
+  <div class="tile {{ 'warn' if stats.unknown }}"><b>{{ stats.unknown }}</b><span>unknown faces</span></div>
+  <div class="tile {{ 'warn' if stats.review }}"><b>{{ stats.review }}</b><span>in _Review</span></div>
+</section>
+
+<section class="panel">
+  <h2>Environment</h2>
+  <table>
+    {% for exe, path in env %}
+    <tr><td>{{ exe }}</td>
+        <td class="{{ 'ok' if path else 'bad' }}">{{ 'OK' if path else 'MISSING' }}</td>
+        <td class="mono">{{ path or 'install via winget/brew — see `check`' }}</td></tr>
+    {% endfor %}
+    <tr><td>faces</td><td class="{{ 'ok' if fok else 'bad' }}">{{ 'OK' if fok else 'ABSENT' }}</td>
+        <td class="mono">{{ fmsg }}</td></tr>
+    <tr><td>faceslib</td><td class="ok">—</td><td class="mono">{{ lib_info }}</td></tr>
+    <tr><td>vision_llm</td>
+        <td class="{{ 'ok' if vc.enabled else '' }}">{{ 'enabled' if vc.enabled else 'disabled' }}</td>
+        <td class="mono">{{ vc.model or 'NOT SET' }} @ {{ vc.base_url or 'NOT SET' }} (key_env={{ vc.api_key_env or 'LLM_API_KEY' }})</td></tr>
+  </table>
+  <p class="hint">Live gateway ping runs in the CLI only: <code>python -m photo_archivist.cli check</code></p>
+</section>
+{% endblock %}

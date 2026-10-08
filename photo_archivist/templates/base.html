@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Photo Archivist{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <a class="brand" href="/">📸 Photo Archivist</a>
+  <nav>
+    <a href="/" {{ 'class=active' if request.path == '/' }}>Dashboard</a>
+    <a href="/browse" {{ 'class=active' if request.path.startswith('/browse') }}>Browse</a>
+    <a href="/search" {{ 'class=active' if request.path.startswith('/search') }}>Search</a>
+    <a href="/people" {{ 'class=active' if request.path.startswith('/people') }}>People</a>
+    <a href="/folders" {{ 'class=active' if request.path.startswith('/folders') }}>Folders</a>
+    <a href="/review" {{ 'class=active' if request.path.startswith('/review') }}>Review</a>
+  </nav>
+  <form class="q" action="/search" method="get">
+    <input type="search" name="q" placeholder="Search captions, OCR, tags, people…"
+           value="{{ request.args.get('q', '') }}">
+  </form>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+<footer>Read-only UI · writes stay CLI-only (<code>scan / undo / enroll</code>) · bound to 127.0.0.1 · no auth</footer>
+</body>
+</html>

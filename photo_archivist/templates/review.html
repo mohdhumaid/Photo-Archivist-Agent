@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "_cards.html" import card %}
+{% block title %}Review · Photo Archivist{% endblock %}
+{% block content %}
+<h1>Review queue <small>{{ rows|length }} file(s)</small></h1>
+<p class="hint">Files in <code>_Review/</code> or carrying <code>Unknown Person</code> faces.
+   Confirm names via <code>enroll</code> + re-scan, or promote manually — the web UI never writes.</p>
+
+{% if rows %}
+<div class="grid">
+  {% for r in rows %}
+    {{ card(r, badge=(r.unknown_people | join(', ')) or '_Review') }}
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">Review queue is empty 🎉</p>
+{% endif %}
+{% endblock %}

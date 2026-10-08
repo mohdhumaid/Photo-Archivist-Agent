@@ -33,6 +33,9 @@ python -m photo_archivist.cli check
 # 7. Verify the LLM output is PROPER (raw text + parsed JSON + PASS/FAIL checks)
 python -m photo_archivist.cli llmtest path/to/photo.jpg
 
+# 8. Read-only web UI (dashboard / browse / search+thumbnails / people / review)
+python -m photo_archivist.cli serve          # http://127.0.0.1:8501
+
 # Optional: face-box detection & enrollment (Haar cascade ships INSIDE the wheel — verify
 # your corporate proxy allows PyPI first:  pip download --no-deps opencv-python-headless -d /tmp/t )
 pip install -e .[faces]
@@ -316,6 +319,29 @@ badly-shaped response falls back to mock and records `caption_source: mock`.
 - Historical note: this repo previously shipped a Purple Fabric client
   (`photo_archivist/core/llm.py`, `config.llm`, `backend: purple_fabric`). It has been
   removed entirely — vision now goes only through `vision_llm` + `vllm.py`.
+
+## Web UI (read-only) — `serve`
+
+```bash
+pip install -e .[web]                         # one extra: flask
+python -m photo_archivist.cli serve           # 127.0.0.1:8501  (add --host/--port)
+```
+
+| Route | Shows |
+|---|---|
+| `/` | dashboard: index stats + environment (binaries, faces, faceslib dims, vision config) |
+| `/browse` | paginated card gallery, filter by type |
+| `/search?q=` | same search engine as the CLI — **each hit renders its image thumbnail** plus reason + provenance |
+| `/file/<id>` | full metadata, people + face boxes, OCR, `.tags.json` sidecar, full-size image |
+| `/people` | named people (counts/confidence/sources) + enrolled face library |
+| `/folders` | learned folder profiles (tags, people, date range) |
+| `/review` | `_Review` + `Unknown Person` queue |
+
+Safety: **read-only** (scan/undo/enroll stay CLI-only), binds `127.0.0.1` by default,
+**no auth** — keep it on localhost. Images resolve only via `file_id` → paths recorded
+in `index.db` inside `Organised/`; any user-supplied id must match `^[0-9a-f]{6,64}$`
+(traversal attempts get 404). Documents show a file icon; missing files show a
+placeholder — never a 500.
 
 ## What This Project Does
 

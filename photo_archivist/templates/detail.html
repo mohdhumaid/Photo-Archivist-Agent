@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ rec.caption or rec.file_id }} · Photo Archivist{% endblock %}
+{% block content %}
+<p><a href="/browse">&larr; back</a></p>
+<h1>{{ rec.caption or '(no caption)' }}</h1>
+
+<div class="detail">
+  <div class="pane">
+    {% if has_image and (rec.mime or '').startswith('image/') %}
+    <a href="/file/{{ rec.file_id }}/image" target="_blank">
+      <img class="full" src="/file/{{ rec.file_id }}/image" alt="">
+    </a>
+    {% else %}
+    <img class="full ph" src="{{ url_for('static', filename='file.svg') }}" alt="no preview">
+    {% endif %}
+    <p class="hint">{{ rec.organised_path or rec.source_path }}
+       {% if rec.organised_path %}<br>source: {{ rec.source_path }}{% endif %}</p>
+  </div>
+
+  <div class="pane">
+    <h2>Metadata</h2>
+    <table>
+      <tr><td>file_id</td><td class="mono">{{ rec.file_id }}</td></tr>
+      <tr><td>type</td><td>{{ rec.type }} ({{ rec.mime }})</td></tr>
+      <tr><td>taken_at</td><td>{{ rec.taken_at or '—' }} <span class="hint">({{ rec.taken_at_source }},
+          conf {{ rec.taken_at_conf }})</span></td></tr>
+      <tr><td>place</td><td>{{ rec.place_value or '—' }} <span class="hint">(source {{ rec.place_source }},
+          conf {{ rec.place_conf }})</span></td></tr>
+      <tr><td>event</td><td>{{ rec.event_value or '—' }} <span class="hint">({{ rec.event_source }})</span></td></tr>
+      <tr><td>tags</td><td>{{ rec.tags or '—' }}</td></tr>
+      <tr><td>camera</td><td>{{ rec.camera or '—' }}</td></tr>
+      <tr><td>metadata_status</td><td>{{ rec.metadata_status or '—' }}</td></tr>
+    </table>
+
+    <h2>People</h2>
+    {% if people %}
+    <table>
+      {% for p in people %}
+      <tr><td>{{ p.name }}</td>
+          <td class="{{ 'bad' if p.name.startswith('Unknown') else 'ok' }}">{{ p.source }}</td>
+          <td>{{ p.conf }}</td>
+          <td class="mono">{{ p.box }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="hint">No people recorded.</p>{% endif %}
+
+    {% if rec.ocr_text %}
+    <h2>OCR text</h2>
+    <pre class="ocr">{{ rec.ocr_text[:4000] }}</pre>
+    {% endif %}
+  </div>
+</div>
+
+{% if sidecar %}
+<details class="panel">
+  <summary>Sidecar <span class="mono">.tags.json</span></summary>
+  <pre class="ocr">{{ sidecar }}</pre>
+</details>
+{% endif %}
+{% endblock %}

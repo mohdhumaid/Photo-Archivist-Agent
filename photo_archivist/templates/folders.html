@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Folders · Photo Archivist{% endblock %}
+{% block content %}
+<h1>Learned folders <small>{{ rows|length }} profiles</small></h1>
+
+{% if rows %}
+<section class="panel">
+  <table>
+    <tr><th>folder</th><th>place</th><th>date range</th><th>tags</th><th>people</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td class="mono">{{ r.name }}</td>
+      <td>{{ r.place or '—' }}</td>
+      <td>{{ r.date_from or '?' }} → {{ r.date_to or '?' }}</td>
+      <td>{% for t in (r.tags or [])[:6] %}<span class="chip">{{ t }}</span> {% endfor %}</td>
+      <td>{% for p in (r.people or [])[:6] %}<span class="chip">{{ p }}</span> {% endfor %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% else %}
+<p class="empty">No folder profiles yet — profiles are learned from <code>scan --no-dry-run --yes</code>.</p>
+{% endif %}
+{% endblock %}

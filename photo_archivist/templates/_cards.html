@@ -1,0 +1,11 @@
+{% macro card(r, reason=None, badge=None) %}
+<a class="card" href="/file/{{ r.file_id }}">
+  <img src="/thumb/{{ r.file_id }}" loading="lazy" alt="">
+  <div class="meta">
+    {% if badge %}<span class="badge">{{ badge }}</span>{% endif %}
+    <div class="cap">{{ r.caption or '(no caption)' }}</div>
+    {% if reason %}<div class="reason">{{ reason }}</div>{% endif %}
+    <div class="path">{{ r.organised_path or r.source_path }}</div>
+  </div>
+</a>
+{% endmacro %}

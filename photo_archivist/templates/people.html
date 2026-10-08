@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}People · Photo Archivist{% endblock %}
+{% block content %}
+<h1>People</h1>
+
+<section class="panel">
+  <h2>Named in indexed files <small>({{ named|length }} names)</small></h2>
+  {% if named %}
+  <table>
+    <tr><th>name</th><th>photos</th><th>avg conf</th><th>sources</th></tr>
+    {% for p in named %}
+    <tr><td><a href="/search?q={{ p.name|urlencode }}">{{ p.name }}</a></td>
+        <td>{{ p.n }}</td><td>{{ p.ac }}</td><td class="mono">{{ p.srcs }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="hint">No named people yet — scan with faces enabled.</p>{% endif %}
+  {% if unknown %}
+  <p class="hint warn-text">{{ unknown }} unknown face(s) — resolve them under
+     <a href="/review">Review</a> or via <code>enroll</code> + re-scan.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Enrolled face library <small>(local only, never uploaded)</small></h2>
+  {% if enrolled %}
+  <table>
+    <tr><th>name</th><th>embedding</th></tr>
+    {% for e in enrolled %}
+    <tr><td>{{ e.name }}</td><td class="mono">{{ e.dims }}-dim</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="hint">No <code>faces_library.json</code> yet — run <code>enroll</code>.</p>{% endif %}
+</section>
+{% endblock %}

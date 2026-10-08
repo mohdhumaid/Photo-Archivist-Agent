@@ -132,7 +132,7 @@ def test_filename_hint_enrolled_and_unenrolled():
     # enrolled name matches filename -> 0.60, face_filename
     persons, unnamed = peoplemod.persons_for_faces(
         det, {}, {"Sanjay Agarwal": [0.0] * 128}, threshold=0.99,
-        path="D:\AI Project\faces\sanjay agarwal.png")
+        path=r"D:\AI Project\faces\sanjay agarwal.png")
     assert persons[0]["name"] == "Sanjay Agarwal"
     assert persons[0]["source"] == "face_filename"
     assert persons[0]["confidence"] == 0.60

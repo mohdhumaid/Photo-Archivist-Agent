@@ -324,5 +324,22 @@ def llmtest(image: str, config: str = "config.yaml"):
     typer.echo("\nVERDICT: LLM OUTPUT PROPER")
 
 
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8501, config: str = "config.yaml"):
+    """Read-only web UI (Flask): browse / search / people / folders / review.
+
+    Binds 127.0.0.1 by default and has NO auth — keep it on localhost.
+    All writes (scan / undo / enroll) stay CLI-only.
+    """
+    try:
+        import flask  # noqa: F401
+    except ImportError:
+        typer.echo("Flask missing — install the web extra:  pip install -e .[web]")
+        raise typer.Exit(1)
+    from .web import create_app
+    typer.echo(f"Web UI: http://{host}:{port}  (read-only, Ctrl+C to stop)")
+    create_app(config).run(host=host, port=port)
+
+
 if __name__ == "__main__":
     app()

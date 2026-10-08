@@ -90,17 +90,76 @@ def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 
                          (f"%{filt['person']}%",)).fetchall()
         pset = {r[0] for r in prow}
         rows = [r for r in rows if r["file_id"] in pset]
-    # content filter: keep only rows that actually match the query terms
-    # (FTS prefix hit OR case-insensitive substring across indexed text).
+    # --- known people named in the query (whole-token match, e.g. "sanjay"
+    #     picking out "Sanjay Agarwal"); drives person-first ranking ---
+    import re as _re
+    q_tokens = set(_re.findall(r"[a-z0-9]+", (query or "").lower()))
+    query_persons: set[str] = set()
+    if filt.get("person"):
+        query_persons.add(str(filt["person"]).lower())
+    try:
+        names = [str(nm) for (nm,) in
+                 c.execute("SELECT DISTINCT name FROM people").fetchall()
+                 if nm and not str(nm).lower().startswith("unknown")]
+        # token -> names containing it; only UNIQUE tokens may identify a
+        # person ('jain' -> Yogesh Jain, but 'yogesh' is ambiguous between
+        # Yogesh Jain / Yogesh Soni and must not boost either).
+        tok_names: dict[str, set[str]] = {}
+        for nm in names:
+            for t in _re.findall(r"[a-z0-9]+", nm.lower()):
+                tok_names.setdefault(t, set()).add(nm.lower())
+        for nm in names:
+            ntoks = _re.findall(r"[a-z0-9]+", nm.lower())
+            if any(t in q_tokens and len(tok_names.get(t, ())) == 1
+                   for t in ntoks):
+                query_persons.add(nm.lower())
+    except Exception:
+        pass
+    people_by_file: dict[str, list[str]] = {}
+    try:
+        for fid, nm in c.execute("SELECT file_id, name FROM people").fetchall():
+            if nm:
+                people_by_file.setdefault(fid, []).append(str(nm))
+    except Exception:
+        pass
+
+    # --- relevance: tier-1 (ALL terms / full phrase / named person) wins;
+    #     otherwise degrade to >=0.5 coverage, ranked by semantic score. ---
+    from . import embed as embedmod
+    from .index import _vec_from_blob
+    qvec = embedmod.text_vector(" ".join(filt["terms"]) or (query or ""))
+    norm_q = " ".join((query or "").lower().split())
+    scored: list[dict] = []
+    for r in rows:
+        blob = " ".join(_blob(r).split())
+        matched = [t for t in filt["terms"] if t.lower() in blob]
+        coverage = (len(matched) / len(filt["terms"])) if filt["terms"] else 1.0
+        phrase = bool(norm_q) and norm_q in blob
+        fts = r["file_id"] in hits
+        person_hit = any(p.lower() in query_persons
+                         for p in people_by_file.get(r["file_id"], []))
+        vec = _vec_from_blob(r["txt_vec"])
+        sem = embedmod.cosine(qvec, vec) if vec else 0.0
+        score = (3.0 * phrase) + (2.5 * person_hit) + (1.0 * coverage) \
+                + (0.6 * sem) + (0.3 * fts) + (0.05 * (r["taken_at_conf"] or 0))
+        scored.append({"r": r, "matched": matched, "score": score,
+                       "full": coverage >= 1.0 or phrase or person_hit,
+                       "coverage": coverage, "phrase": phrase,
+                       "person_hit": person_hit})
     if filt["terms"]:
-        tl = [t.lower() for t in filt["terms"]]
-        rows = [r for r in rows
-                if r["file_id"] in hits or any(t in _blob(r) for t in tl)]
-    # rank: FTS hit first, then confidence
-    rows.sort(key=lambda r: (0 if r["file_id"] in hits else 1,
-                             -((r["taken_at_conf"] or 0))))
+        tier1 = [s for s in scored if s["full"]]
+        if tier1:
+            chosen = tier1          # precision: drop partial-keyword noise
+        else:
+            floor = 0.5 if len(filt["terms"]) >= 2 else 1.0
+            chosen = [s for s in scored if s["coverage"] >= floor
+                      or s["phrase"] or s["person_hit"]]
+    else:
+        chosen = scored
+    chosen.sort(key=lambda s: -s["score"])
     out = []
-    for r in rows[:limit]:
+    for s in chosen[:limit]:
+        r = s["r"]
         ppl = c.execute("SELECT name,source,conf FROM people WHERE file_id=?",
                         (r["file_id"],)).fetchall()
         reason_bits = []
@@ -114,13 +173,16 @@ def search(db_path: str, query: str, role_map: dict | None = None, limit: int = 
                 for p in ppl))
         if r["taken_at"]:
             reason_bits.append(f"{r['taken_at']} (from {r['taken_at_source']})")
-        if filt["terms"]:
-            matched = [t for t in filt["terms"] if t.lower() in _blob(r)]
-            if matched:
-                reason_bits.append("text match: " + ", ".join(matched))
+        if s["matched"]:
+            reason_bits.append("text match: " + ", ".join(s["matched"]))
+        if s["phrase"]:
+            reason_bits.append("exact phrase")
+        if s["person_hit"]:
+            reason_bits.append("named person match")
         out.append({"file_id": r["file_id"], "source_path": r["source_path"],
                     "organised_path": r["organised_path"], "caption": r["caption"],
                     "reason": " · ".join(reason_bits) or "tag/vector match",
-                    "in_fts": r["file_id"] in hits})
+                    "in_fts": r["file_id"] in hits,
+                    "score": round(s["score"], 3)})
     c.close()
     return out

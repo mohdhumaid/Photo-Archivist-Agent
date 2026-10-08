@@ -9,31 +9,7 @@ import tempfile
 
 def ffprobe(path: str) -> dict:
     """Probe video/audio metadata: ffprobe binary first, then PyAV, then OpenCV, then audio fallbacks."""
-    exe = shutil.which("ffprobe")
-    if exe:
-        try:
-            out = subprocess.run(
-                [exe, "-v", "quiet", "-print_format", "json", "-show_format",
-                 "-show_streams", path],
-                capture_output=True, text=True,
-            )
-            data = json.loads(out.stdout or "{}")
-            if data and ("streams" in data or "format" in data):
-                return data
-        except Exception:
-            pass
-    pyav_res = _pyav_probe(path)
-    if "_error" not in pyav_res:
-        return pyav_res
-
-    cv2_res = _cv2_probe(path)
-    if "_error" not in cv2_res:
-        return cv2_res
-
-    audio_res = _audio_probe(path)
-    if "_error" not in audio_res:
-        return audio_res
-
+    # 1. Try ffprobe binary
     exe = shutil.which("ffprobe")
     if exe:
         try:
@@ -48,41 +24,29 @@ def ffprobe(path: str) -> dict:
         except Exception:
             pass
 
-    # If ffprobe binary fails, try PyAV
+    # 2. Try PyAV
     pyav_res = _pyav_probe(path)
     if "_error" not in pyav_res:
         return pyav_res
 
-    # If PyAV fails, try OpenCV
+    # 3. Try OpenCV
     cv2_res = _cv2_probe(path)
     if "_error" not in cv2_res:
         return cv2_res
 
-    # If OpenCV fails, try audio-specific probe (e.g., WAV)
+    # 4. Try audio-specific probe
     audio_res = _audio_probe(path)
     if "_error" not in audio_res:
         return audio_res
 
-    # If all probes fail, return the last encountered error or a generic one
-    # Prioritize returning a more specific error if available, otherwise a generic message.
-    if "_error" in audio_res and audio_res["_error"] != "unsupported audio container: .wav": # Avoid returning generic audio error if it was specific to WAV
+    # All failed, return best available error
+    if "_error" in audio_res:
         return audio_res
     elif "_error" in cv2_res:
         return cv2_res
     elif "_error" in pyav_res:
         return pyav_res
     else:
-        return {"_error": "Could not probe video/audio metadata with any available tool.", "_via": "fallback_chain"}
-    # If all probes fail, return the last error (from audio, if applicable)
-    # The order of preference for probing is: ffprobe > av > cv2 > audio
-    if "_error" not in audio_res:
-        return audio_res
-    elif "_error" not in cv2_res:
-        return cv2_res
-    elif "_error" not in pyav_res:
-        return pyav_res
-    else:
-        # Fallback to a generic error if all probes failed
         return {"_error": "Could not probe video/audio metadata with any available tool.", "_via": "fallback_chain"}
 
 

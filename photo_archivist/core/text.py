@@ -70,10 +70,11 @@ def ooxml_text(path: str) -> str:
 def ocr_image(path: str) -> str:
     """OCR for scanned docs / signage. Called only when no text layer exists.
 
-    Uses the `tesseract` binary directly via subprocess to avoid heavy
-    pandas/numpy dependency chains (pytesseract pulls pandas -> pyarrow
-    which breaks on NumPy 2.x in some envs).
+    Uses the `tesseract` binary directly via subprocess.
+    If tesseract fails or is missing, falls back to EasyOCR (if installed).
+    Finally, falls back to the vision-LLM transcribe path.
     """
+    # 1. Try Tesseract
     exe = shutil.which("tesseract")
     if exe:
         try:
@@ -84,8 +85,19 @@ def ocr_image(path: str) -> str:
                 return text
         except Exception:
             pass
-    # no tesseract: EasyOCR/trocr need model downloads (org policy forbids),
-    # so the vision-LLM transcribe path (already configured) is the fallback.
+
+    # 2. Try EasyOCR fallback
+    try:
+        import easyocr
+        reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+        result = reader.readtext(path, detail=0)
+        text = "\n".join(result).strip()
+        if text:
+            return text
+    except Exception:
+        pass
+
+    # 3. Last resort: vision-LLM
     return _vision_ocr_hint(path)
 
 

@@ -8,6 +8,7 @@ already a core dependency.
 from __future__ import annotations
 import json
 import os
+from datetime import datetime
 import shutil
 import subprocess
 
@@ -258,6 +259,17 @@ def _pillow_dump(path: str) -> dict:
             out.update(_gps_keys(gps_dict))
         except Exception:
             pass
+
+    # Add file system access and modification times
+    try:
+        stat_info = os.stat(path)
+        # st_atime is access time, st_mtime is modification time
+        # Convert to ISO format for consistency
+        out["File:FileAccessDate"] = datetime.fromtimestamp(stat_info.st_atime).isoformat()
+        out["File:FileModifyDate"] = datetime.fromtimestamp(stat_info.st_mtime).isoformat()
+    except Exception as e:
+        # Log or handle error if file stat fails
+        print(f"Warning: Could not get file system times for {path}: {e}")
 
     return out
 

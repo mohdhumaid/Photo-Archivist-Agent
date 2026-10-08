@@ -1,6 +1,8 @@
 """Step 4: Text — text layer first; OCR only when no text layer exists."""
 from __future__ import annotations
 import os
+import shutil
+import subprocess
 
 
 def pdf_text(path: str) -> tuple[str, bool]:
@@ -72,15 +74,49 @@ def ocr_image(path: str) -> str:
     pandas/numpy dependency chains (pytesseract pulls pandas -> pyarrow
     which breaks on NumPy 2.x in some envs).
     """
-    import shutil
-    import subprocess
     exe = shutil.which("tesseract")
-    if not exe:
+    if exe:
+        try:
+            out = subprocess.run([exe, path, "stdout", "-l", "eng"],
+                                 capture_output=True, text=True, timeout=120)
+            text = (out.stdout or "")[:20000].strip()
+            if text:
+                return text
+        except Exception:
+            pass
+    # no tesseract: EasyOCR/trocr need model downloads (org policy forbids),
+    # so the vision-LLM transcribe path (already configured) is the fallback.
+    return _vision_ocr_hint(path)
+
+
+def _vision_ocr_hint(path: str) -> str:
+    """OCR last resort: prompt the vision-LLM to transcribe visible text.
+
+    Runs only when vision_llm.enabled is true and the gateway is reachable;
+    otherwise returns "" — OCR stays absent rather than invented.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return ""
+    cfg = {}
+    try:
+        if os.path.exists("config.yaml"):
+            with open("config.yaml") as f:
+                cfg = yaml.safe_load(f) or {}
+    except Exception:
+        return ""
+    from . import vllm as vllmmod
+    if not vllmmod.enabled(cfg):
         return ""
     try:
-        out = subprocess.run([exe, path, "stdout", "-l", "eng"],
-                             capture_output=True, text=True, timeout=120)
-        return (out.stdout or "")[:20000]
+        prime = {"file_name": os.path.basename(path), "file_type": "image",
+                 "mime": "image/jpeg", "path_segments": [], "ocr_text": "",
+                 "metadata": {}}
+        out = vllmmod.describe(cfg, path, prime)
+        if not isinstance(out, dict):
+            return ""
+        return str(out.get("visible_text") or out.get("caption") or "")[:4000]
     except Exception:
         return ""
 

@@ -201,6 +201,13 @@ def check():
         if p:
             typer.echo(f"{exe:10s} OK   {p}")
             continue
+        if exe == "exiftool":
+            try:
+                import PIL  # noqa: F401
+                typer.echo(f"{exe:10s} OPTIONAL (Pillow active: pure-Python EXIF enabled)")
+                continue
+            except ImportError:
+                pass
         if win:
             tip = {"exiftool": "winget install exiftool",
                    "ffprobe": "winget install Gyan.FFmpeg",
@@ -215,6 +222,11 @@ def check():
     if not fok:
         typer.echo("           install once: pip install opencv-python-headless")
         typer.echo("           (the Haar cascade XML ships INSIDE that wheel — no other download)")
+    # pure-Python coverage: what still works WITHOUT the external binaries
+    typer.echo(f"{'fallback':10s} exiftool missing -> Pillow EXIF (marked _via=pillow)")
+    typer.echo(f"{'':10s} ffprobe/ffmpeg missing -> OpenCV video probe + keyframe")
+    typer.echo(f"{'':10s} tesseract missing -> text-layer PDFs stay searchable, "
+               "scans use the vision-LLM transcribe path")
     cfg = load_cfg()
     from .core import vllm as vllmmod
     if vllmmod.enabled(cfg):

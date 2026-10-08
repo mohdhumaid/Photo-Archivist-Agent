@@ -8,6 +8,7 @@ every write logged + undoable. Full operating rules: see `OPERATING_CONTEXT.md`
 
 ```bash
 pip install -e . && pip install pytest
+# Binaries are optional (exiftool/ffprobe/tesseract fall back to pure-Python/OpenCV/PDF tools):
 brew install exiftool tesseract ffmpeg   # ffmpeg provides ffprobe; apt on Linux
 
 # 1. Dry run (writes nothing)

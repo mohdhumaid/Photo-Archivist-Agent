@@ -333,7 +333,8 @@ python -m photo_archivist.cli serve           # 127.0.0.1:8501  (add --host/--po
 | `/` | dashboard: index stats + environment (binaries, faces, faceslib dims, vision config) |
 | `/browse` | paginated card gallery, filter by type |
 | `/search?q=` | same search engine as the CLI — **each hit renders its image thumbnail** plus reason + provenance |
-| `/file/<id>` | full metadata, people + face boxes, OCR, `.tags.json` sidecar, full-size image |
+| `/file/<id>` | full metadata, people + face boxes, OCR, `.tags.json` sidecar, full-size image, **Download original** button |
+| `/file/<id>/download` | original file as a download attachment (images, documents, videos); ⬇ icon on every browse/search/review card |
 | `/people` | named people (counts/confidence/sources) + enrolled face library |
 | `/folders` | learned folder profiles (tags, people, date range) |
 | `/review` | `_Review` + `Unknown Person` queue |

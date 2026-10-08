@@ -120,6 +120,37 @@ def test_unknown_file_id_404(web):
     assert client.get("/file/abcdef123456").status_code == 404
 
 
+def test_download_returns_attachment_with_bytes(web):
+    client, img_rec, doc_rec = web
+    resp = client.get(f"/file/{img_rec['file_id']}/download")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers.get("Content-Disposition", "")
+    assert "sample.jpg" in resp.headers.get("Content-Disposition", "")
+    assert len(resp.data) > 0
+    # documents download too
+    resp2 = client.get(f"/file/{doc_rec['file_id']}/download")
+    assert resp2.status_code == 200
+    assert "attachment" in resp2.headers.get("Content-Disposition", "")
+
+
+def test_download_unknown_or_bad_id_404(web):
+    client, _img, _doc = web
+    assert client.get("/file/abcdef123456/download").status_code == 404
+    assert client.get("/file/nothex/download").status_code == 404
+
+
+def test_detail_page_shows_download_button(web):
+    client, img_rec, _doc = web
+    html = client.get(f"/file/{img_rec['file_id']}").get_data(as_text=True)
+    assert f"/file/{img_rec['file_id']}/download" in html
+
+
+def test_cards_show_download_links(web):
+    client, _img, _doc = web
+    html = client.get("/browse").get_data(as_text=True)
+    assert "/download" in html
+
+
 def test_review_lists_unknown_person(web):
     client, _img, _doc = web
     html = client.get("/review").get_data(as_text=True)

@@ -15,6 +15,9 @@
     {% endif %}
     <p class="hint">{{ rec.organised_path or rec.source_path }}
        {% if rec.organised_path %}<br>source: {{ rec.source_path }}{% endif %}</p>
+    {% if has_image or rec.type in ('document', 'video') %}
+    <p><a class="btn" href="/file/{{ rec.file_id }}/download">⬇ Download original</a></p>
+    {% endif %}
   </div>
 
   <div class="pane">

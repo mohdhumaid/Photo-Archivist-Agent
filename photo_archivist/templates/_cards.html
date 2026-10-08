@@ -1,5 +1,7 @@
 {% macro card(r, reason=None, badge=None) %}
-<a class="card" href="/file/{{ r.file_id }}">
+<div class="card">
+  <a class="card-link" href="/file/{{ r.file_id }}" aria-label="open"></a>
+  <a class="dl" href="/file/{{ r.file_id }}/download" title="Download original" download>&#11015;</a>
   <img src="/thumb/{{ r.file_id }}" loading="lazy" alt="">
   <div class="meta">
     {% if badge %}<span class="badge">{{ badge }}</span>{% endif %}
@@ -7,5 +9,5 @@
     {% if reason %}<div class="reason">{{ reason }}</div>{% endif %}
     <div class="path">{{ r.organised_path or r.source_path }}</div>
   </div>
-</a>
+</div>
 {% endmacro %}

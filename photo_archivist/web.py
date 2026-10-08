@@ -283,6 +283,16 @@ def create_app(config_path: str = "config.yaml") -> Flask:
             abort(404)
         return send_file(ap, mimetype=rec["mime"], conditional=True)
 
+    @app.route("/file/<file_id>/download")
+    def download(file_id: str):
+        """Original file as an attachment (images, documents, videos)."""
+        rec = _record(file_id)
+        ap = _resolve_file(rec)
+        if ap is None:
+            abort(404)
+        return send_file(ap, as_attachment=True,
+                         download_name=os.path.basename(ap))
+
     return app
 
 

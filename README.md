@@ -377,6 +377,31 @@ copies (or hardlinks) only into an `Organised/` output tree and writes no files 
 - **Dry run**: when `--no-dry-run` is not passed, `scan` prints the proposed plan to the terminal
   instead of writing anything.
 
+## Organised folder layout
+
+New folders are named **Year → Month → Event**, never flat:
+
+```
+Organised/
+├── 2025/
+│   ├── 2025-07/
+│   │   ├── Indiranagar - Branch Launches/
+│   │   └── Branch Launches Mon Jul/
+│   └── 2025-08/
+│       └── Indiranagar - Branch Launches/
+├── 2023/
+│   └── Docs/
+├── Unsorted/                 # date present but no place/event
+└── _Review/                  # 0.60-0.79 scores, Unknown persons, no reliable date
+```
+
+Rules: leaf is `<Place> - <Event>` (place alone when no event, and vice versa);
+no reliable date → flat leaf like `2023/Docs` or a bare leaf; unreliable date
+→ `_Review` instead. Folder names are opaque strings in the learning loop —
+`decide()` promotes into existing `2025/2025-07/...` paths exactly as before.
+Each segment is sanitised (`< > : " / \ | ? *` removed) so metadata can never
+break the nesting, and `organise_copy` creates the levels with `makedirs`.
+
 ## Architecture
 
 ### Component map

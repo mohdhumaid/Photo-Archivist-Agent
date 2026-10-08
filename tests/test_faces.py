@@ -101,6 +101,21 @@ def test_enroll_folder_and_match(tmp_path):
     assert m["confidence"] == 1.0
 
 
+
+
+def test_new_folder_name_year_month_event(tmp_path):
+    from photo_archivist.cli import _new_folder_name
+    r = {"taken_at": "2025-07-14T10:00:00",
+         "place": {"value": "Indiranagar"}, "event": {"value": "Branch Launches"}}
+    assert _new_folder_name(r) == "2025/2025-07/Indiranagar - Branch Launches"
+    assert _new_folder_name({"taken_at": "in 2023", "event": {"value": "Docs"}}) == "2023/Docs"
+    assert _new_folder_name({}) == "Unsorted"
+    # separators in metadata can never break out of the leaf
+    out = _new_folder_name({"taken_at": "2025-08-01", "place": {"value": "A/B"},
+                            "event": {"value": "C"}})
+    assert out == "2025/2025-08/AB - C"
+
+
 def test_persons_for_faces_tags_every_face():
     """3 detections -> 3 person entries (region + match + placeholder)."""
     from photo_archivist.core import people as peoplemod

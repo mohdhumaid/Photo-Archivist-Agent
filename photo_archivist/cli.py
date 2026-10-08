@@ -33,46 +33,39 @@ def iter_source(src: str, exclude: list) -> list[str]:
     return sorted(out)
 
 
-def _new_folder_name(r: dict, profiles: list[dict]) -> str:
-    """Derive a new folder name from metadata first (never vision caption alone).
+def _seg(s: str, limit: int) -> str:
+    """One filesystem-safe path segment: no separators, no trailing dots."""
+    import re
+    s = re.sub(r"[<>:\"/\\|?*]", "", str(s or ""))
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    return s[:limit].strip()
+
+
+def _new_folder_name(r: dict, profiles: list[dict] | None = None) -> str:
+    """Nested Year/Month/Event folder path: ``YYYY/YYYY-MM/<Place - Event>``.
 
     Copies the pattern already on disk: if existing folders read
     'YYYY-MM <Event>' keep that; if they read '<Event> Mon YYYY' match it.
     Components: date from reconciled taken_at, place from place.value,
-    event from event.value. Below-threshold files never reach here —
-    decide() routes them to _Review first.
+    event from event.value. No date -> flat leaf; no place/event -> Unsorted.
+    Below-threshold files never reach here — decide() routes them to _Review
+    first. (``profiles`` kept for signature compatibility only.)
     """
     import re
     taken = str(r.get("taken_at") or "")
     m = re.search(r"(19|20)\d{2}[-:/](\d{1,2})", taken)
-    year, mon = (m.group(0)[:4], m.group(2).zfill(2)) if m else ("", "")
+    year = m.group(0)[:4] if m else ""
+    mon = m.group(2).zfill(2) if m else ""
     m2 = re.search(r"\b(19|20)\d{2}\b", taken)
     year_only = m2.group(0) if m2 else ""
-    event = str((r.get("event") or {}).get("value") or "").strip()
-    place = str((r.get("place") or {}).get("value") or "").strip()
-    # keep names filesystem-safe and short
-    event = re.sub(r"[<>:\"/\\|?*]", "", event)[:60].strip()
-    place = re.sub(r"[<>:\"/\\|?*]", "", place.split(",")[0])[:40].strip()
-    core = " / ".join(p for p in (place, event) if p) or "Unsorted"
-    names = [p.get("name", "") for p in (profiles or [])]
-    pat_dash = any(re.match(r"^\d{4}-\d{2}\s", n) for n in names)
-    pat_long = any(re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", n)
-                   for n in names)
-    if year and mon and pat_dash:
-        return f"{year}-{mon} {core}".strip()
-    if year_only and pat_long:
-        import calendar
-        mon_name = ""
-        try:
-            mon_name = calendar.month_abbr[int(mon)].title() if mon else ""
-        except Exception:
-            mon_name = ""
-        return f"{core} {mon_name} {year_only}".strip()
+    event = _seg((r.get("event") or {}).get("value"), 60)
+    place = _seg(str((r.get("place") or {}).get("value") or "").split(",")[0], 40)
+    leaf = " - ".join(p for p in (place, event) if p) or "Unsorted"
     if year and mon:
-        return f"{year}-{mon} {core}".strip()  # default pattern
+        return f"{year}/{year}-{mon}/{leaf}"
     if year_only:
-        return f"{year_only} {core}".strip()
-    return core
+        return f"{year_only}/{leaf}"
+    return leaf
 
 
 @app.command()

@@ -54,6 +54,7 @@ config.yaml             # all tunable DEFAULTs (thresholds, excludes, hardlink, 
 people_library.yaml     # confirmed names + org role map (MD -> Anita Rao ...)
 faces_library.json      # face-embedding library (LOCAL ONLY, git-ignored; dormant)
 photo_archivist/cli.py  # scan / search / undo / enroll / check
+photo_archivist/web.py   # serve: read-only Flask UI (templates/ + static/)
 photo_archivist/core/
   detect.py fingerprint.py pipeline.py
   metadata/{exif,docs,video,fs,reconcile,place}.py
